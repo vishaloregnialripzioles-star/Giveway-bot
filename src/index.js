@@ -1,12 +1,12 @@
 // Prefer IPv4 first on hosts where IPv6 routes can stall outbound Discord API requests.
 require("node:dns").setDefaultResultOrder("ipv4first");
 
+const https = require("node:https");
 const {
   Client,
   Events,
   GatewayIntentBits,
   MessageFlags,
-  REST,
   Routes,
 } = require("discord.js");
 const { loadConfig } = require("./config");
@@ -266,8 +266,8 @@ async function registerCommandsWithRetry(config, client) {
   let delayMs = 60_000;
   while (client.isReady()) {
     try {
-      await registerCommands(config);
-      console.log(`Slash commands registered${config.guildId ? ` for guild ${config.guildId}` : " globally"}.`);
+      await registerCommands(config, client);
+      console.log("Slash command registration completed successfully.");
       return;
     } catch (error) {
       const message = String(error?.message || error)
@@ -281,15 +281,61 @@ async function registerCommandsWithRetry(config, client) {
   }
 }
 
-async function registerCommands(config) {
-  const rest = new REST({ version: "10", timeout: 15_000, retries: 0 }).setToken(config.token);
-  const route = config.guildId
-    ? Routes.applicationGuildCommands(config.clientId, config.guildId)
-    : Routes.applicationCommands(config.clientId);
-  const scope = config.guildId ? `guild ${config.guildId}` : "global";
-  console.log(`Registering ${commandData.length} slash commands to ${scope}...`);
-  const registered = await rest.put(route, { body: commandData });
-  console.log(`Discord accepted ${Array.isArray(registered) ? registered.length : commandData.length} slash command(s) for ${scope}.`);
+async function registerCommands(config, client) {
+  // Register to each connected guild when GUILD_ID is not configured. Guild
+  // commands become available immediately instead of waiting for global-command propagation.
+  const guildIds = config.guildId
+    ? [config.guildId]
+    : [...new Set(client?.guilds?.cache?.keys?.() ?? [])];
+  if (guildIds.length) {
+    console.log(`Registering ${commandData.length} slash commands to ${guildIds.length} guild(s)...`);
+    for (const guildId of guildIds) {
+      const route = Routes.applicationGuildCommands(config.clientId, guildId);
+      const registered = await discordApiRequest(route, config.token, commandData);
+      console.log(`Discord accepted ${Array.isArray(registered) ? registered.length : commandData.length} slash command(s) for guild ${guildId}.`);
+    }
+    return;
+  }
+
+  const route = Routes.applicationCommands(config.clientId);
+  console.log(`No guilds are cached; registering ${commandData.length} slash commands globally...`);
+  const registered = await discordApiRequest(route, config.token, commandData);
+  console.log(`Discord accepted ${Array.isArray(registered) ? registered.length : commandData.length} global slash command(s).`);
+}
+
+function discordApiRequest(route, token, body) {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body);
+    const request = https.request({
+      hostname: "discord.com",
+      path: `/api/v10${route}`,
+      method: "PUT",
+      timeout: 12_000,
+      headers: {
+        Authorization: `Bot ${token}`,
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(payload),
+      },
+    }, (response) => {
+      let responseBody = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => { responseBody += chunk; });
+      response.on("end", () => {
+        let data = null;
+        try { data = responseBody ? JSON.parse(responseBody) : null; } catch {}
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          resolve(data);
+          return;
+        }
+        const retryAfter = response.headers["retry-after"];
+        const details = typeof data?.message === "string" ? data.message : "Discord returned an error response.";
+        reject(new Error(`Discord API HTTP ${response.statusCode}${retryAfter ? ` (retry-after ${retryAfter}s)` : ""}: ${details.slice(0, 180)}`));
+      });
+    });
+    request.on("timeout", () => request.destroy(new Error("Discord API command registration timed out after 12 seconds.")));
+    request.on("error", (error) => reject(error));
+    request.end(payload);
+  });
 }
 
 async function handleGiveawayButton(interaction, store) {
