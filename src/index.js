@@ -94,7 +94,23 @@ async function main() {
 
 
 function createClient() {
-  return new Client({ intents: [GatewayIntentBits.Guilds], ws: { gateway: "wss://gateway.discord.gg" } });
+  return new Client({
+    intents: [GatewayIntentBits.Guilds],
+    ws: {
+      // Avoid the /gateway/bot REST discovery request during login. This can
+      // keep Gateway startup independent from a REST edge/rate-limit outage.
+      fetchGatewayInformation: async () => ({
+        url: "wss://gateway.discord.gg",
+        shards: 1,
+        session_start_limit: {
+          total: 1000,
+          remaining: 1000,
+          reset_after: 86_400_000,
+          max_concurrency: 1,
+        },
+      }),
+    },
+  });
 }
 
 function configureClient(client, config, store, appState, server) {
