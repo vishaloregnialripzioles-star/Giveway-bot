@@ -47,6 +47,7 @@ async function main() {
   client.once(Events.ClientReady, async (readyClient) => {
     try {
       console.log(`Logged in as ${readyClient.user.tag}`);
+      client.off(Events.Debug, gatewayDebugListener);
       await registerCommands(config);
       console.log(`Slash commands registered${config.guildId ? ` for guild ${config.guildId}` : " globally"}.`);
       let schedulerBusy = false;
@@ -119,6 +120,15 @@ async function main() {
   client.on(Events.ShardReady, (shardId) => {
     console.log("Discord shard " + shardId + " ready.");
   });
+  const gatewayDebugListener = (message) => {
+    const safeMessage = String(message || "")
+      .replace(/(?:postgres(?:ql)?):\/\/[^\s]+/gi, "[redacted database URL]")
+      .replace(/\b[\w-]{24}\.[\w-]{6}\.[\w-]{25,}\b/g, "[redacted token]")
+      .replace(/[\r\n]+/g, " ")
+      .slice(0, 500);
+    console.log("Discord gateway debug: " + safeMessage);
+  };
+  client.on(Events.Debug, gatewayDebugListener);
   process.once("SIGTERM", () => shutdown(client, store, server));
   process.once("SIGINT", () => shutdown(client, store, server));
 
