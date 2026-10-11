@@ -1,3 +1,6 @@
+// Prefer IPv4 first on hosts where IPv6 routes can stall outbound Discord API requests.
+require("node:dns").setDefaultResultOrder("ipv4first");
+
 const {
   Client,
   Events,
