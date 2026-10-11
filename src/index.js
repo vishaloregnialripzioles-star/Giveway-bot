@@ -99,7 +99,9 @@ function createClient() {
     ws: {
       // Avoid the /gateway/bot REST discovery request during login. This can
       // keep Gateway startup independent from a REST edge/rate-limit outage.
-      fetchGatewayInformation: async () => ({
+      fetchGatewayInformation: async () => {
+        console.log("Gateway discovery callback invoked; using direct Discord Gateway URL.");
+        return {
         url: "wss://gateway.discord.gg",
         shards: 1,
         session_start_limit: {
@@ -108,7 +110,8 @@ function createClient() {
           reset_after: 86_400_000,
           max_concurrency: 1,
         },
-      }),
+        };
+      },
     },
   });
 }
