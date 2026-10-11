@@ -170,8 +170,6 @@ function configureClient(client, config, store, appState, server) {
     client.on(Events.ShardReady, (shardId) => {
       console.log("Discord shard " + shardId + " ready.");
     });
-    process.once("SIGTERM", () => shutdown(client, store, server));
-    process.once("SIGINT", () => shutdown(client, store, server));
 }
 
 function withTimeout(promise, timeoutMs, message) {
