@@ -14,15 +14,35 @@ const {
 } = require("./giveaways");
 const { createStore } = require("./store");
 const { getMemberRoleIds } = require("./utils");
+const { close: closeWebServer, createWebServer, listen } = require("./web");
 
 async function main() {
   const config = loadConfig();
   const store = createStore({ connectionString: config.databaseUrl, ssl: config.pgSsl });
-  await store.initialize();
+  try {
+    await store.initialize();
+  } catch (error) {
+    await store.close().catch(() => {});
+    throw error;
+  }
 
   const client = new Client({
     intents: [GatewayIntentBits.Guilds],
   });
+  const appState = { initialized: false };
+  const server = createWebServer({ client, store, appState });
+  const port = Number(process.env.PORT || 3000);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    await store.close();
+    throw new Error("PORT must be an integer between 1 and 65535.");
+  }
+  try {
+    await listen(server, port);
+  } catch (error) {
+    await store.close().catch(() => {});
+    throw error;
+  }
+  console.log(`HTTP health server listening on 0.0.0.0:${port}`);
 
   client.once(Events.ClientReady, async (readyClient) => {
     try {
@@ -41,6 +61,7 @@ async function main() {
         }
       };
       await schedulerTick();
+      appState.initialized = true;
       setInterval(() => {
         schedulerTick().catch((error) => {
             console.error("Giveaway scheduler error:", error.message);
@@ -48,6 +69,7 @@ async function main() {
       }, 10_000).unref();
     } catch (error) {
       console.error("Bot initialization failed after login:", error);
+      await closeWebServer(server);
       client.destroy();
       await store.close().catch(() => {});
       process.exitCode = 1;
@@ -76,10 +98,17 @@ async function main() {
   });
 
   client.on(Events.Error, (error) => console.error("Discord client error:", error.message));
-  process.once("SIGTERM", () => shutdown(client, store));
-  process.once("SIGINT", () => shutdown(client, store));
+  process.once("SIGTERM", () => shutdown(client, store, server));
+  process.once("SIGINT", () => shutdown(client, store, server));
 
-  await client.login(config.token);
+  try {
+    await client.login(config.token);
+  } catch (error) {
+    await closeWebServer(server);
+    client.destroy();
+    await store.close().catch(() => {});
+    throw error;
+  }
 }
 
 async function registerCommands(config) {
@@ -180,8 +209,9 @@ async function processPendingAnnouncements(client, store) {
   }
 }
 
-async function shutdown(client, store) {
+async function shutdown(client, store, server) {
   console.log("Shutting down...");
+  await closeWebServer(server);
   client.destroy();
   await store.close().catch((error) => console.error("Database shutdown error:", error.message));
   process.exit(0);

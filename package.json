@@ -11,7 +11,7 @@
     "start": "node src/index.js",
     "register": "node src/register-commands.js",
     "test": "node --test",
-    "check": "node --check src/index.js && node --check src/commands.js && node --check src/giveaways.js && node --check src/store.js && node --check src/utils.js && node --check src/register-commands.js"
+    "check": "node --check src/index.js && node --check src/web.js && node --check src/config.js && node --check src/commands.js && node --check src/giveaways.js && node --check src/store.js && node --check src/utils.js && node --check src/register-commands.js"
   },
   "dependencies": {
     "discord.js": "^14.19.3",

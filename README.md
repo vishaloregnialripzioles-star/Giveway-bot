@@ -1,8 +1,8 @@
 # Giveway-bot
 
 A Discord giveaway bot built with Discord.js and PostgreSQL. It runs as a
-long-lived **Render Background Worker**, stores giveaways and entries in
-PostgreSQL, and recovers expired giveaways after a restart.
+**Render Web Service**, exposes a health endpoint, stores giveaways and entries
+in PostgreSQL, and recovers expired giveaways after a restart.
 
 ## Features
 
@@ -50,25 +50,42 @@ bot.
 
 ## Deploy on Render
 
-Create a **Background Worker** connected to this repository:
+Create a **Web Service** connected to this repository and choose the **Free**
+instance plan:
 
 - **Build Command:** `npm install`
 - **Start Command:** `npm start`
 - **Runtime:** Node
+- **Health Check Path:** `/healthz`
 
-Create a Render PostgreSQL database in the same region as the worker, then add
-these environment variables under the worker's **Environment** settings:
+The bot listens on Render's injected `PORT` value and binds to `0.0.0.0`.
+Create a PostgreSQL database and add these environment variables under the
+web service's **Environment** settings:
 
 | Variable | Required | Value |
 | --- | --- | --- |
 | `DISCORD_TOKEN` | Yes | Bot token from Discord Developer Portal |
 | `CLIENT_ID` | Yes | Discord application ID |
-| `DATABASE_URL` | Yes | Render PostgreSQL **Internal Database URL** |
+| `DATABASE_URL` | Yes | PostgreSQL connection URL; use Render's **Internal Database URL** if the database is on Render |
 | `GUILD_ID` | No | Development server ID for fast command updates; omit in production |
 | `PGSSL` | No | Set `true` only if your database provider explicitly requires TLS and the URL doesn't configure it |
 
-Do not commit `.env` or put the bot token in source control. Render's filesystem
-is not used for application data; PostgreSQL holds giveaway state.
+`GET /healthz` returns `200` when the bot has initialized and PostgreSQL is
+reachable; it returns `503` while starting or if the database is unreachable.
+The root URL returns a small status message.
+
+### Free-plan limitations
+
+Render's Free Web Services spin down after 15 minutes without inbound traffic
+and can take about a minute to wake on the next request. That means this bot is
+not guaranteed to stay connected to Discord 24/7 on the free plan; it can miss
+events while sleeping and will reconnect when Render starts it again. The health
+endpoint makes it a valid Web Service, but does not guarantee always-on uptime.
+
+Render's Free PostgreSQL databases are limited to 1 GB and expire 30 days after
+creation; use a database provider with suitable persistence if you need giveaway
+records to last longer. The service's local filesystem is not used for giveaway
+data. Do not commit `.env` or put the bot token in source control.
 
 ## Commands
 

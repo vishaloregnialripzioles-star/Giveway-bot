@@ -60,6 +60,11 @@ function createStore({ connectionString, ssl }) {
     `);
   }
 
+  async function health() {
+    await pool.query("SELECT 1");
+    return true;
+  }
+
   async function createGiveaway(data) {
     const result = await pool.query(
       `INSERT INTO giveaways
@@ -353,6 +358,7 @@ function createStore({ connectionString, ssl }) {
     finish,
     getById,
     getByMessage,
+    health,
     initialize,
     join,
     leave,

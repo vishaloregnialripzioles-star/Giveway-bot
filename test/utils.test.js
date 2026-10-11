@@ -5,6 +5,7 @@ const {
   getMemberRoleIds,
   parseDuration,
 } = require("../src/utils");
+const { close, createWebServer, listen } = require("../src/web");
 
 test("parseDuration accepts supported units and trims whitespace", () => {
   assert.equal(parseDuration("1m"), 60_000);
@@ -40,4 +41,61 @@ test("role extraction supports both Discord interaction member shapes", () => {
     getMemberRoleIds({ roles: { cache: new Map([["member", {}], ["vip", {}]]) } }),
     ["member", "vip"],
   );
+});
+
+test("web service exposes a readiness health endpoint and a simple root page", async () => {
+  const appState = { initialized: false };
+  const server = createWebServer({
+    appState,
+    client: { isReady: () => true },
+    store: { health: async () => true },
+  });
+
+  await listen(server, 0, "127.0.0.1");
+  const address = server.address();
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  try {
+    const starting = await fetch(`${baseUrl}/healthz`);
+    assert.equal(starting.status, 503);
+    assert.deepEqual(await starting.json(), {
+      status: "starting",
+      discord: "connected",
+      database: "connected",
+    });
+
+    appState.initialized = true;
+    const healthy = await fetch(`${baseUrl}/healthz`);
+    assert.equal(healthy.status, 200);
+    assert.equal((await healthy.json()).status, "ok");
+
+    const home = await fetch(baseUrl);
+    assert.equal(home.status, 200);
+    assert.match(await home.text(), /Giveaway Bot is running/);
+
+    const missing = await fetch(`${baseUrl}/not-a-route`);
+    assert.equal(missing.status, 404);
+  } finally {
+    await close(server);
+  }
+});
+
+test("health endpoint reports database failures as unhealthy", async () => {
+  const server = createWebServer({
+    appState: { initialized: true },
+    client: { isReady: () => false },
+    store: { health: async () => { throw new Error("database unavailable"); } },
+  });
+
+  await listen(server, 0, "127.0.0.1");
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/healthz`);
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), {
+      status: "starting",
+      discord: "reconnecting",
+      database: "unavailable",
+    });
+  } finally {
+    await close(server);
+  }
 });
