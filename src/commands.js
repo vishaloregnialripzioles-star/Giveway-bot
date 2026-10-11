@@ -88,7 +88,11 @@ const giveawayCommand = new SlashCommandBuilder()
       ),
   );
 
-const commandData = [giveawayCommand.toJSON()];
+const pingCommand = new SlashCommandBuilder()
+  .setName("ping")
+  .setDescription("Check whether the bot is responding and view Gateway latency");
+
+const commandData = [giveawayCommand.toJSON(), pingCommand.toJSON()];
 
 async function handleGiveawayCommand(interaction, { store, client }) {
   if (!interaction.inGuild()) {
