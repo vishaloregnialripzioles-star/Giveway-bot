@@ -122,35 +122,14 @@ async function main() {
   process.once("SIGTERM", () => shutdown(client, store, server));
   process.once("SIGINT", () => shutdown(client, store, server));
 
-  // Verify the configured token over Discord's REST API before opening the
-  // Gateway. This distinguishes an invalid token from a Gateway connection issue.
-  console.log("Checking Discord bot token with the REST API...");
-  try {
-    const rest = new REST({ version: "10" }).setToken(config.token);
-    const botUser = await withTimeout(
-      rest.get(Routes.user()),
-      15_000,
-      "Discord REST API did not respond within 15 seconds. Check outbound connectivity from Render.",
-    );
-    console.log(`Discord REST authentication succeeded for ${botUser.username} (${botUser.id}).`);
-  } catch (error) {
-    const status = error.status ?? error.httpStatus ?? "unknown";
-    const message = String(error?.message || "Unknown Discord REST error.")
-      .replace(/\b[\w-]{24}\.[\w-]{6}\.[\w-]{25,}\b/g, "[redacted token]")
-      .replace(/[\r\n]+/g, " ")
-      .slice(0, 300);
-    await closeWebServer(server);
-    client.destroy();
-    await store.close().catch(() => {});
-    throw new Error(`Discord token preflight failed (HTTP ${status}): ${message}`);
-  }
-
+  // Connect to Discord Gateway first. A REST preflight can block startup on
+  // environments where HTTPS requests stall, even when the Gateway may work.
   console.log("Connecting to Discord Gateway...");
   try {
     await withTimeout(
       client.login(config.token),
       45_000,
-      "Discord Gateway did not become ready within 45 seconds. REST token authentication succeeded; check Gateway connectivity and the Discord application's bot/session configuration.",
+      "Discord Gateway did not become ready within 45 seconds. Check the bot token, Discord Gateway connectivity, and application configuration.",
     );
   } catch (error) {
     await closeWebServer(server);
