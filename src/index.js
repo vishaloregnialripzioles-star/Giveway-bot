@@ -156,7 +156,7 @@ async function main() {
   }
 }
 
-async function withTimeout(promise, timeoutMs, message) {
+function withTimeout(promise, timeoutMs, message) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
     promise.then(
@@ -172,7 +172,7 @@ async function withTimeout(promise, timeoutMs, message) {
   });
 }
 
-function registerCommands(config) {
+async function registerCommands(config) {
   const rest = new REST({ version: "10" }).setToken(config.token);
   const route = config.guildId
     ? Routes.applicationGuildCommands(config.clientId, config.guildId)
