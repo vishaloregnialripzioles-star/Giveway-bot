@@ -91,15 +91,17 @@ async function main() {
 
 
 function createClient() {
-  return new Client({ intents: [GatewayIntentBits.Guilds] });
+  return new Client({ intents: [GatewayIntentBits.Guilds], ws: { gateway: "wss://gateway.discord.gg" } });
 }
 
 function configureClient(client, config, store, appState, server) {
     client.once(Events.ClientReady, async (readyClient) => {
       try {
         console.log(`Logged in as ${readyClient.user.tag}`);
-        await registerCommands(config);
-        console.log(`Slash commands registered${config.guildId ? ` for guild ${config.guildId}` : " globally"}.`);
+        // Register commands independently: REST rate limits must not take the Gateway bot offline.
+        registerCommandsWithRetry(config, readyClient).catch((error) => {
+          console.error("Slash command registration retry worker stopped:", error.message);
+        });
         let schedulerBusy = false;
         const schedulerTick = async () => {
           if (schedulerBusy) return;
@@ -186,6 +188,25 @@ function withTimeout(promise, timeoutMs, message) {
       },
     );
   });
+}
+
+async function registerCommandsWithRetry(config, client) {
+  let delayMs = 60_000;
+  while (client.isReady()) {
+    try {
+      await registerCommands(config);
+      console.log(`Slash commands registered${config.guildId ? ` for guild ${config.guildId}` : " globally"}.`);
+      return;
+    } catch (error) {
+      const message = String(error?.message || error)
+        .replace(/[\\r\\n]+/g, " ")
+        .replace(/\\b[\\w-]{24}\\.[\\w-]{6}\\.[\\w-]{25,}\\b/g, "[redacted token]")
+        .slice(0, 250);
+      console.error("Slash command registration failed; bot remains online and will retry:", message);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      delayMs = Math.min(delayMs * 2, 15 * 60_000);
+    }
+  }
 }
 
 async function registerCommands(config) {
