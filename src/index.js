@@ -94,7 +94,7 @@ async function main() {
 
 
 function createClient() {
-  return new Client({
+  const client = new Client({
     intents: [GatewayIntentBits.Guilds],
     ws: {
       // Avoid the /gateway/bot REST discovery request during login. This can
@@ -114,6 +114,41 @@ function createClient() {
       },
     },
   });
+  installGatewayDiscoveryBypass(client);
+  return client;
+}
+
+// discord.js v14's Client constructor may not forward the undocumented
+// fetchGatewayInformation option into its legacy WebSocketManager. Intercept
+// only the Gateway-discovery route on the same REST instance used by the
+// manager; all other REST requests retain the original implementation.
+function installGatewayDiscoveryBypass(client) {
+  const rest = client.options?.rest;
+  if (!rest || typeof rest.get !== "function" || rest.__gatewayBypassInstalled) {
+    console.warn("Gateway discovery bypass could not be installed on the Discord REST client.");
+    return;
+  }
+
+  const originalGet = rest.get.bind(rest);
+  const gatewayRoute = Routes.gatewayBot();
+  rest.get = function (route, ...args) {
+    const routePath = typeof route === "string" ? route : route?.path;
+    if (routePath === gatewayRoute || routePath === "/gateway/bot") {
+      console.log("Gateway discovery intercepted locally; using direct Discord Gateway URL.");
+      return Promise.resolve({
+        url: "wss://gateway.discord.gg",
+        shards: 1,
+        session_start_limit: {
+          total: 1000,
+          remaining: 1000,
+          reset_after: 86_400_000,
+          max_concurrency: 1,
+        },
+      });
+    }
+    return originalGet(route, ...args);
+  };
+  Object.defineProperty(rest, "__gatewayBypassInstalled", { value: true });
 }
 
 function configureClient(client, config, store, appState, server) {
