@@ -137,11 +137,15 @@ async function main() {
       10_000,
       "Native HTTPS request to Discord timed out.",
     );
-    const body = await response.json().catch(() => ({}));
+    const bodyText = await response.text().catch(() => "");
+    let body = {};
+    try { body = JSON.parse(bodyText); } catch {}
     if (response.ok) {
       console.log("Discord HTTPS check passed (HTTP " + response.status + "; bot identity verified).");
     } else {
-      console.error("Discord HTTPS check failed (HTTP " + response.status + "; " + (body?.message || "no response detail") + "). Check DISCORD_TOKEN in Render.");
+      const retryAfter = response.headers.get("retry-after") || body?.retry_after || "not provided";
+      const detail = String(body?.message || bodyText || "no response detail").replace(/[\\r\\n]+/g, " ").slice(0, 180);
+      console.error("Discord HTTPS check failed (HTTP " + response.status + "; retry-after=" + retryAfter + "; " + detail + ").");
     }
   } catch (error) {
     console.error("Discord HTTPS check failed (" + (error.name || "Error") + "): " + String(error.message || error).slice(0, 240));
@@ -153,8 +157,8 @@ async function main() {
   try {
     await withTimeout(
       client.login(config.token),
-      45_000,
-      "Discord Gateway did not become ready within 45 seconds. See the Discord HTTPS check above for token/connectivity diagnostics.",
+      180_000,
+      "Discord Gateway did not become ready within 180 seconds. See the Discord HTTPS check above for token/connectivity diagnostics.",
     );
   } catch (error) {
     console.error("Discord Gateway connection failed:", error.message);
