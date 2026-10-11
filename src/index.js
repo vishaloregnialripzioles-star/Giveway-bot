@@ -127,7 +127,11 @@ async function main() {
   console.log("Checking Discord bot token with the REST API...");
   try {
     const rest = new REST({ version: "10" }).setToken(config.token);
-    const botUser = await rest.get(Routes.user());
+    const botUser = await withTimeout(
+      rest.get(Routes.user()),
+      15_000,
+      "Discord REST API did not respond within 15 seconds. Check outbound connectivity from Render.",
+    );
     console.log(`Discord REST authentication succeeded for ${botUser.username} (${botUser.id}).`);
   } catch (error) {
     const status = error.status ?? error.httpStatus ?? "unknown";
