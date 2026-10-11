@@ -98,9 +98,31 @@ async function main() {
   });
 
   client.on(Events.Error, (error) => console.error("Discord client error:", error.message));
+  client.on(Events.ShardError, (error, shardId) => {
+    const name = typeof error?.name === "string" ? error.name : "Error";
+    const message = String(error?.message || "Unknown shard error.")
+      .replace(/[\r\n]+/g, " ")
+      .replace(/\b[\w-]{24}\.[\w-]{6}\.[\w-]{25,}\b/g, "[redacted token]")
+      .slice(0, 300);
+    console.error("Discord shard " + shardId + " error (" + name + "): " + message);
+  });
+  client.on(Events.ShardDisconnect, (closeEvent, shardId) => {
+    const reason = String(closeEvent.reason || "")
+      .replace(/[\r\n]+/g, " ")
+      .replace(/\b[\w-]{24}\.[\w-]{6}\.[\w-]{25,}\b/g, "[redacted token]")
+      .slice(0, 200);
+    console.error("Discord shard " + shardId + " disconnected (code=" + closeEvent.code + ", clean=" + closeEvent.wasClean + ")" + (reason ? "; reason=" + reason : ""));
+  });
+  client.on(Events.ShardReconnecting, (shardId) => {
+    console.warn("Discord shard " + shardId + " reconnecting.");
+  });
+  client.on(Events.ShardReady, (shardId) => {
+    console.log("Discord shard " + shardId + " ready.");
+  });
   process.once("SIGTERM", () => shutdown(client, store, server));
   process.once("SIGINT", () => shutdown(client, store, server));
 
+  console.log("Connecting to Discord Gateway...");
   try {
     await client.login(config.token);
   } catch (error) {
