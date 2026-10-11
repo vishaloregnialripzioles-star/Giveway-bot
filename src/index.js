@@ -125,47 +125,25 @@ async function main() {
   process.once("SIGTERM", () => shutdown(client, store, server));
   process.once("SIGINT", () => shutdown(client, store, server));
 
-  // Probe Discord's authenticated REST endpoint independently of discord.js.
-  // This verifies the token and outbound HTTPS without logging the secret.
-  try {
-    console.log("Checking Discord HTTPS connectivity (token value will not be logged)...");
-    const response = await withTimeout(
-      fetch("https://discord.com/api/v10/users/@me", {
-        headers: { Authorization: "Bot " + config.token, "User-Agent": "Giveway-bot/1.0" },
-        signal: AbortSignal.timeout(8_000),
-      }),
-      10_000,
-      "Native HTTPS request to Discord timed out.",
-    );
-    const bodyText = await response.text().catch(() => "");
-    let body = {};
-    try { body = JSON.parse(bodyText); } catch {}
-    if (response.ok) {
-      console.log("Discord HTTPS check passed (HTTP " + response.status + "; bot identity verified).");
-    } else {
-      const retryAfter = response.headers.get("retry-after") || body?.retry_after || "not provided";
-      const detail = String(body?.message || bodyText || "no response detail").replace(/[\\r\\n]+/g, " ").slice(0, 180);
-      console.error("Discord HTTPS check failed (HTTP " + response.status + "; retry-after=" + retryAfter + "; " + detail + ").");
-    }
-  } catch (error) {
-    console.error("Discord HTTPS check failed (" + (error.name || "Error") + "): " + String(error.message || error).slice(0, 240));
-  }
-
-  // Keep the health endpoint alive if Discord is temporarily unreachable so
-  // Render does not immediately cycle the service; the failure is logged.
+  // Avoid an extra authenticated REST probe at startup. A proxy/edge 429 can
+  // be unrelated to the token, and repeated probes may prolong an outage.
+  // Keep the HTTP server and database alive while connecting. discord.js
+  // handles normal Gateway reconnects itself.
   console.log("Connecting to Discord Gateway...");
-  try {
-    await withTimeout(
-      client.login(config.token),
-      180_000,
-      "Discord Gateway did not become ready within 180 seconds. See the Discord HTTPS check above for token/connectivity diagnostics.",
-    );
-  } catch (error) {
-    console.error("Discord Gateway connection failed:", error.message);
-    client.destroy();
-    await store.close().catch(() => {});
-    // Keep the health endpoint available for diagnosis instead of crashing.
-    return;
+  let retryDelayMs = 30_000;
+  while (!client.isReady()) {
+    try {
+      await client.login(config.token);
+      break;
+    } catch (error) {
+      const message = String(error?.message || error)
+        .replace(/[\r\n]+/g, " ")
+        .replace(/\b[\w-]{24}\.[\w-]{6}\.[\w-]{25,}\b/g, "[redacted token]")
+        .slice(0, 300);
+      console.error("Discord Gateway login failed; keeping health server alive and retrying:", message);
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+      retryDelayMs = Math.min(retryDelayMs * 2, 15 * 60_000);
+    }
   }
 }
 
