@@ -274,9 +274,15 @@ async function registerCommandsWithRetry(config, client) {
         .replace(/[\\r\\n]+/g, " ")
         .replace(/\\b[\\w-]{24}\\.[\\w-]{6}\\.[\\w-]{25,}\\b/g, "[redacted token]")
         .slice(0, 250);
-      console.error("Slash command registration failed; bot remains online and will retry:", message);
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-      delayMs = Math.min(delayMs * 2, 15 * 60_000);
+      const retryAfterMs = Number(error?.retryAfterMs);
+      const waitMs = Number.isFinite(retryAfterMs) && retryAfterMs > 0
+        ? Math.min(retryAfterMs + 1_000, 24 * 60 * 60_000)
+        : delayMs;
+      console.error(`Slash command registration failed; bot remains online and will retry in ${Math.ceil(waitMs / 1_000)} seconds:`, message);
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+      if (!(Number.isFinite(retryAfterMs) && retryAfterMs > 0)) {
+        delayMs = Math.min(delayMs * 2, 15 * 60_000);
+      }
     }
   }
 }
@@ -327,9 +333,11 @@ function discordApiRequest(route, token, body) {
           resolve(data);
           return;
         }
-        const retryAfter = response.headers["retry-after"];
+        const retryAfter = Number(response.headers["retry-after"]);
         const details = typeof data?.message === "string" ? data.message : "Discord returned an error response.";
-        reject(new Error(`Discord API HTTP ${response.statusCode}${retryAfter ? ` (retry-after ${retryAfter}s)` : ""}: ${details.slice(0, 180)}`));
+        const error = new Error(`Discord API HTTP ${response.statusCode}${Number.isFinite(retryAfter) && retryAfter > 0 ? ` (retry-after ${retryAfter}s)` : ""}: ${details.slice(0, 180)}`);
+        if (Number.isFinite(retryAfter) && retryAfter > 0) error.retryAfterMs = retryAfter * 1_000;
+        reject(error);
       });
     });
     request.on("timeout", () => request.destroy(new Error("Discord API command registration timed out after 12 seconds.")));
