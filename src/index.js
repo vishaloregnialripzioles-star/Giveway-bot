@@ -54,7 +54,6 @@ async function main() {
   // be unrelated to the token, and repeated probes may prolong an outage.
   // Keep the HTTP server and database alive while connecting. discord.js
   // handles normal Gateway reconnects itself.
-  configureClient(client, config, store, appState, server);
   console.log("Connecting to Discord Gateway...");
   let retryDelayMs = 30_000;
   while (!client.isReady()) {
