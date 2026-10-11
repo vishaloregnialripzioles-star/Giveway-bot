@@ -123,7 +123,7 @@ function createClient() {
 // only the Gateway-discovery route on the same REST instance used by the
 // manager; all other REST requests retain the original implementation.
 function installGatewayDiscoveryBypass(client) {
-  const rest = client.options?.rest;
+  const rest = client.rest;
   if (!rest || typeof rest.get !== "function" || rest.__gatewayBypassInstalled) {
     console.warn("Gateway discovery bypass could not be installed on the Discord REST client.");
     return;
