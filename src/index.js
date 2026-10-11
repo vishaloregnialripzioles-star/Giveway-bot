@@ -125,20 +125,43 @@ async function main() {
   process.once("SIGTERM", () => shutdown(client, store, server));
   process.once("SIGINT", () => shutdown(client, store, server));
 
-  // Connect to Discord Gateway first. A REST preflight can block startup on
-  // environments where HTTPS requests stall, even when the Gateway may work.
+  // Probe Discord's authenticated REST endpoint independently of discord.js.
+  // This verifies the token and outbound HTTPS without logging the secret.
+  try {
+    console.log("Checking Discord HTTPS connectivity (token value will not be logged)...");
+    const response = await withTimeout(
+      fetch("https://discord.com/api/v10/users/@me", {
+        headers: { Authorization: "Bot " + config.token, "User-Agent": "Giveway-bot/1.0" },
+        signal: AbortSignal.timeout(8_000),
+      }),
+      10_000,
+      "Native HTTPS request to Discord timed out.",
+    );
+    const body = await response.json().catch(() => ({}));
+    if (response.ok) {
+      console.log("Discord HTTPS check passed (HTTP " + response.status + "; bot identity verified).");
+    } else {
+      console.error("Discord HTTPS check failed (HTTP " + response.status + "; " + (body?.message || "no response detail") + "). Check DISCORD_TOKEN in Render.");
+    }
+  } catch (error) {
+    console.error("Discord HTTPS check failed (" + (error.name || "Error") + "): " + String(error.message || error).slice(0, 240));
+  }
+
+  // Keep the health endpoint alive if Discord is temporarily unreachable so
+  // Render does not immediately cycle the service; the failure is logged.
   console.log("Connecting to Discord Gateway...");
   try {
     await withTimeout(
       client.login(config.token),
       45_000,
-      "Discord Gateway did not become ready within 45 seconds. Check the bot token, Discord Gateway connectivity, and application configuration.",
+      "Discord Gateway did not become ready within 45 seconds. See the Discord HTTPS check above for token/connectivity diagnostics.",
     );
   } catch (error) {
-    await closeWebServer(server);
+    console.error("Discord Gateway connection failed:", error.message);
     client.destroy();
     await store.close().catch(() => {});
-    throw error;
+    // Keep the health endpoint available for diagnosis instead of crashing.
+    return;
   }
 }
 
