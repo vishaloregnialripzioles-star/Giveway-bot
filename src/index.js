@@ -154,7 +154,12 @@ function configureClient(client, config, store, appState, server) {
     });
   
     client.on(Events.Debug, (message) => {
-      const safeMessage = String(message || "").replace(/[\\r\\n]+/g, " ").replace(/\\b[\\w-]{24}\\.[\\w-]{6}\\.[\\w-]{25,}\\b/g, "[redacted token]").slice(0, 500);
+      const rawMessage = String(message || "");
+      if (/provided token/i.test(rawMessage)) {
+        console.log("Discord debug: token supplied to Discord.js (value intentionally omitted).");
+        return;
+      }
+      const safeMessage = rawMessage.replace(/[\\r\\n]+/g, " ").replace(/[A-Za-z0-9_-]{20,}\\.[A-Za-z0-9_-]{5,}\\.[A-Za-z0-9_-]{20,}/g, "[redacted token]").slice(0, 500);
       console.log("Discord debug:", safeMessage);
     });
     client.on(Events.Error, (error) => console.error("Discord client error:", error.message));
