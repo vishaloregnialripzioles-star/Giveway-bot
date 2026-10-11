@@ -63,11 +63,13 @@ async function main() {
       ? Promise.resolve()
       : new Promise((resolve) => client.once(Events.ClientReady, resolve));
     try {
+      console.log("Discord login starting; gateway=" + String(client.ws?.gateway || "default") + "; shardStatus=" + String(client.ws?.status ?? "unknown"));
       await withTimeout(
         client.login(config.token),
         180_000,
         "Discord login timed out before completing.",
       );
+      console.log("Discord login promise resolved; waiting for Gateway READY.");
       await withTimeout(
         readyPromise,
         180_000,
@@ -80,6 +82,7 @@ async function main() {
         .replace(/\b[\w-]{24}\.[\w-]{6}\.[\w-]{25,}\b/g, "[redacted token]")
         .slice(0, 300);
       console.error("Discord connection attempt failed; keeping health server alive and retrying:", message);
+      console.error("Discord connection diagnostics:", JSON.stringify({ gateway: client.ws?.gateway || null, shardStatus: client.ws?.status ?? null, shardCount: client.ws?.shards?.size ?? null }));
       client.destroy();
       client = createClient();
       configureClient(client, config, store, appState, server);
@@ -150,6 +153,10 @@ function configureClient(client, config, store, appState, server) {
       }
     });
   
+    client.on(Events.Debug, (message) => {
+      const safeMessage = String(message || "").replace(/[\\r\\n]+/g, " ").replace(/\\b[\\w-]{24}\\.[\\w-]{6}\\.[\\w-]{25,}\\b/g, "[redacted token]").slice(0, 500);
+      console.log("Discord debug:", safeMessage);
+    });
     client.on(Events.Error, (error) => console.error("Discord client error:", error.message));
     client.on(Events.ShardError, (error, shardId) => {
       const name = typeof error?.name === "string" ? error.name : "Error";
