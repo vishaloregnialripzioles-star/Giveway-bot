@@ -29,11 +29,10 @@ async function main() {
     throw error;
   }
 
-  const client = new Client({
-    intents: [GatewayIntentBits.Guilds],
-  });
+  let client = createClient();
+  const clientState = { isReady: () => Boolean(client?.isReady()) };
   const appState = { initialized: false };
-  const server = createWebServer({ client, store, appState });
+  const server = createWebServer({ client: clientState, store, appState });
   const port = Number(process.env.PORT || 3000);
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
     await store.close();
@@ -47,88 +46,15 @@ async function main() {
   }
   console.log(`HTTP health server listening on 0.0.0.0:${port}`);
 
-  client.once(Events.ClientReady, async (readyClient) => {
-    try {
-      console.log(`Logged in as ${readyClient.user.tag}`);
-      await registerCommands(config);
-      console.log(`Slash commands registered${config.guildId ? ` for guild ${config.guildId}` : " globally"}.`);
-      let schedulerBusy = false;
-      const schedulerTick = async () => {
-        if (schedulerBusy) return;
-        schedulerBusy = true;
-        try {
-          await processDueGiveaways(client, store);
-          await processPendingAnnouncements(client, store);
-        } finally {
-          schedulerBusy = false;
-        }
-      };
-      await schedulerTick();
-      appState.initialized = true;
-      setInterval(() => {
-        schedulerTick().catch((error) => {
-            console.error("Giveaway scheduler error:", error.message);
-        });
-      }, 10_000).unref();
-    } catch (error) {
-      console.error("Bot initialization failed after login:", error);
-      await closeWebServer(server);
-      client.destroy();
-      await store.close().catch(() => {});
-      process.exitCode = 1;
-    }
-  });
+  configureClient(client, config, store, appState, server);
 
-  client.on(Events.InteractionCreate, async (interaction) => {
-    try {
-      if (interaction.isChatInputCommand() && interaction.commandName === "giveaway") {
-        await handleGiveawayCommand(interaction, { store, client });
-      } else if (interaction.isButton() && interaction.customId.startsWith("giveaway:")) {
-        await handleGiveawayButton(interaction, store);
-      }
-    } catch (error) {
-      console.error("Interaction failed:", error);
-      const payload = {
-        content: "Something went wrong handling that action. Please try again; the error has been logged.",
-        flags: MessageFlags.Ephemeral,
-      };
-      if (interaction.deferred || interaction.replied) {
-        await interaction.followUp(payload).catch(() => {});
-      } else {
-        await interaction.reply(payload).catch(() => {});
-      }
-    }
-  });
 
-  client.on(Events.Error, (error) => console.error("Discord client error:", error.message));
-  client.on(Events.ShardError, (error, shardId) => {
-    const name = typeof error?.name === "string" ? error.name : "Error";
-    const message = String(error?.message || "Unknown shard error.")
-      .replace(/[\r\n]+/g, " ")
-      .replace(/\b[\w-]{24}\.[\w-]{6}\.[\w-]{25,}\b/g, "[redacted token]")
-      .slice(0, 300);
-    console.error("Discord shard " + shardId + " error (" + name + "): " + message);
-  });
-  client.on(Events.ShardDisconnect, (closeEvent, shardId) => {
-    const reason = String(closeEvent.reason || "")
-      .replace(/[\r\n]+/g, " ")
-      .replace(/\b[\w-]{24}\.[\w-]{6}\.[\w-]{25,}\b/g, "[redacted token]")
-      .slice(0, 200);
-    console.error("Discord shard " + shardId + " disconnected (code=" + closeEvent.code + ", clean=" + closeEvent.wasClean + ")" + (reason ? "; reason=" + reason : ""));
-  });
-  client.on(Events.ShardReconnecting, (shardId) => {
-    console.warn("Discord shard " + shardId + " reconnecting.");
-  });
-  client.on(Events.ShardReady, (shardId) => {
-    console.log("Discord shard " + shardId + " ready.");
-  });
-  process.once("SIGTERM", () => shutdown(client, store, server));
-  process.once("SIGINT", () => shutdown(client, store, server));
 
   // Avoid an extra authenticated REST probe at startup. A proxy/edge 429 can
   // be unrelated to the token, and repeated probes may prolong an outage.
   // Keep the HTTP server and database alive while connecting. discord.js
   // handles normal Gateway reconnects itself.
+  configureClient(client, config, store, appState, server);
   console.log("Connecting to Discord Gateway...");
   let retryDelayMs = 30_000;
   while (!client.isReady()) {
@@ -156,10 +82,97 @@ async function main() {
         .slice(0, 300);
       console.error("Discord connection attempt failed; keeping health server alive and retrying:", message);
       client.destroy();
+      client = createClient();
+      configureClient(client, config, store, appState, server);
       await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
       retryDelayMs = Math.min(retryDelayMs * 2, 15 * 60_000);
     }
   }
+}
+
+
+function createClient() {
+  return new Client({ intents: [GatewayIntentBits.Guilds] });
+}
+
+function configureClient(client, config, store, appState, server) {
+    client.once(Events.ClientReady, async (readyClient) => {
+      try {
+        console.log(`Logged in as ${readyClient.user.tag}`);
+        await registerCommands(config);
+        console.log(`Slash commands registered${config.guildId ? ` for guild ${config.guildId}` : " globally"}.`);
+        let schedulerBusy = false;
+        const schedulerTick = async () => {
+          if (schedulerBusy) return;
+          schedulerBusy = true;
+          try {
+            await processDueGiveaways(client, store);
+            await processPendingAnnouncements(client, store);
+          } finally {
+            schedulerBusy = false;
+          }
+        };
+        await schedulerTick();
+        appState.initialized = true;
+        setInterval(() => {
+          schedulerTick().catch((error) => {
+              console.error("Giveaway scheduler error:", error.message);
+          });
+        }, 10_000).unref();
+      } catch (error) {
+        console.error("Bot initialization failed after login:", error);
+        await closeWebServer(server);
+        client.destroy();
+        await store.close().catch(() => {});
+        process.exitCode = 1;
+      }
+    });
+  
+    client.on(Events.InteractionCreate, async (interaction) => {
+      try {
+        if (interaction.isChatInputCommand() && interaction.commandName === "giveaway") {
+          await handleGiveawayCommand(interaction, { store, client });
+        } else if (interaction.isButton() && interaction.customId.startsWith("giveaway:")) {
+          await handleGiveawayButton(interaction, store);
+        }
+      } catch (error) {
+        console.error("Interaction failed:", error);
+        const payload = {
+          content: "Something went wrong handling that action. Please try again; the error has been logged.",
+          flags: MessageFlags.Ephemeral,
+        };
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp(payload).catch(() => {});
+        } else {
+          await interaction.reply(payload).catch(() => {});
+        }
+      }
+    });
+  
+    client.on(Events.Error, (error) => console.error("Discord client error:", error.message));
+    client.on(Events.ShardError, (error, shardId) => {
+      const name = typeof error?.name === "string" ? error.name : "Error";
+      const message = String(error?.message || "Unknown shard error.")
+        .replace(/[\r\n]+/g, " ")
+        .replace(/\b[\w-]{24}\.[\w-]{6}\.[\w-]{25,}\b/g, "[redacted token]")
+        .slice(0, 300);
+      console.error("Discord shard " + shardId + " error (" + name + "): " + message);
+    });
+    client.on(Events.ShardDisconnect, (closeEvent, shardId) => {
+      const reason = String(closeEvent.reason || "")
+        .replace(/[\r\n]+/g, " ")
+        .replace(/\b[\w-]{24}\.[\w-]{6}\.[\w-]{25,}\b/g, "[redacted token]")
+        .slice(0, 200);
+      console.error("Discord shard " + shardId + " disconnected (code=" + closeEvent.code + ", clean=" + closeEvent.wasClean + ")" + (reason ? "; reason=" + reason : ""));
+    });
+    client.on(Events.ShardReconnecting, (shardId) => {
+      console.warn("Discord shard " + shardId + " reconnecting.");
+    });
+    client.on(Events.ShardReady, (shardId) => {
+      console.log("Discord shard " + shardId + " ready.");
+    });
+    process.once("SIGTERM", () => shutdown(client, store, server));
+    process.once("SIGINT", () => shutdown(client, store, server));
 }
 
 function withTimeout(promise, timeoutMs, message) {
