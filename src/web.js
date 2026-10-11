@@ -6,13 +6,19 @@ function createWebServer({ client, store, appState }) {
     const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
     response.setHeader("Cache-Control", "no-store");
 
-    if (request.method === "GET" && pathname === "/") {
-      response.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-      response.end("Giveaway Bot is running. Health check: /healthz\n");
+    // Liveness endpoints should answer whether this HTTP process is alive.
+    // Discord can be reconnecting temporarily without the web process being down.
+    if (request.method === "GET" && ["/", "/health", "/healthz", "/ping", "/uptime"].includes(pathname)) {
+      response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({
+        status: "ok",
+        service: "giveaway-bot",
+        discord: client.isReady() ? "connected" : "reconnecting",
+      }));
       return;
     }
 
-    if (request.method === "GET" && pathname === "/healthz") {
+    if (request.method === "GET" && pathname === "/readyz") {
       let databaseConnected = false;
       try {
         await store.health();
@@ -33,7 +39,7 @@ function createWebServer({ client, store, appState }) {
         }
       }
 
-      const ready = appState.initialized && databaseConnected;
+      const ready = appState.initialized && databaseConnected && client.isReady();
       response.writeHead(ready ? 200 : 503, {
         "Content-Type": "application/json; charset=utf-8",
       });
