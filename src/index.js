@@ -188,7 +188,12 @@ function configureClient(client, config, store, appState, server) {
   
     client.on(Events.InteractionCreate, async (interaction) => {
       try {
-        if (interaction.isChatInputCommand() && interaction.commandName === "giveaway") {
+        if (interaction.isChatInputCommand() && interaction.commandName === "ping") {
+          const gatewayLatency = client.ws.ping;
+          await interaction.reply({
+            content: `🏓 Pong! Gateway latency: ${gatewayLatency >= 0 ? Math.round(gatewayLatency) + " ms" : "connecting"}.`,
+          });
+        } else if (interaction.isChatInputCommand() && interaction.commandName === "giveaway") {
           await handleGiveawayCommand(interaction, { store, client });
         } else if (interaction.isButton() && interaction.customId.startsWith("giveaway:")) {
           await handleGiveawayButton(interaction, store);
@@ -257,6 +262,7 @@ function withTimeout(promise, timeoutMs, message) {
 }
 
 async function registerCommandsWithRetry(config, client) {
+  console.log("Slash command registration worker started.");
   let delayMs = 60_000;
   while (client.isReady()) {
     try {
@@ -276,11 +282,14 @@ async function registerCommandsWithRetry(config, client) {
 }
 
 async function registerCommands(config) {
-  const rest = new REST({ version: "10" }).setToken(config.token);
+  const rest = new REST({ version: "10", timeout: 15_000, retries: 0 }).setToken(config.token);
   const route = config.guildId
     ? Routes.applicationGuildCommands(config.clientId, config.guildId)
     : Routes.applicationCommands(config.clientId);
-  await rest.put(route, { body: commandData });
+  const scope = config.guildId ? `guild ${config.guildId}` : "global";
+  console.log(`Registering ${commandData.length} slash commands to ${scope}...`);
+  const registered = await rest.put(route, { body: commandData });
+  console.log(`Discord accepted ${Array.isArray(registered) ? registered.length : commandData.length} slash command(s) for ${scope}.`);
 }
 
 async function handleGiveawayButton(interaction, store) {
