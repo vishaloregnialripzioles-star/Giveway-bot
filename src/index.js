@@ -132,15 +132,30 @@ async function main() {
   console.log("Connecting to Discord Gateway...");
   let retryDelayMs = 30_000;
   while (!client.isReady()) {
+    // Attach before login so a fast READY event cannot be missed. Some network
+    // failures leave login pending instead of rejecting, so bound both phases.
+    const readyPromise = client.isReady()
+      ? Promise.resolve()
+      : new Promise((resolve) => client.once(Events.ClientReady, resolve));
     try {
-      await client.login(config.token);
+      await withTimeout(
+        client.login(config.token),
+        180_000,
+        "Discord login timed out before completing.",
+      );
+      await withTimeout(
+        readyPromise,
+        180_000,
+        "Discord Gateway did not become ready within 180 seconds.",
+      );
       break;
     } catch (error) {
       const message = String(error?.message || error)
         .replace(/[\r\n]+/g, " ")
         .replace(/\b[\w-]{24}\.[\w-]{6}\.[\w-]{25,}\b/g, "[redacted token]")
         .slice(0, 300);
-      console.error("Discord Gateway login failed; keeping health server alive and retrying:", message);
+      console.error("Discord connection attempt failed; keeping health server alive and retrying:", message);
+      client.destroy();
       await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
       retryDelayMs = Math.min(retryDelayMs * 2, 15 * 60_000);
     }
