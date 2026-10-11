@@ -1,6 +1,7 @@
 const { createServer } = require("node:http");
 
 function createWebServer({ client, store, appState }) {
+  let lastDatabaseHealthError = null;
   return createServer(async (request, response) => {
     const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
     response.setHeader("Cache-Control", "no-store");
@@ -16,8 +17,20 @@ function createWebServer({ client, store, appState }) {
       try {
         await store.health();
         databaseConnected = true;
-      } catch {
-        // Return an unhealthy status so Render can detect a database outage.
+        lastDatabaseHealthError = null;
+      } catch (error) {
+        const code = typeof error?.code === "string" ? error.code : "UNKNOWN";
+        const name = typeof error?.name === "string" ? error.name : "Error";
+        const message = String(error?.message || "Unknown database error.")
+          .replace(/postgres(?:ql)?:\/\/[^\s]+/gi, "[redacted database URL]")
+          .replace(/\b[\w-]{24}\.[\w-]{6}\.[\w-]{25,}\b/g, "[redacted token]")
+          .replace(/[\r\n]+/g, " ")
+          .slice(0, 300);
+        const signature = code + "/" + name + ": " + message;
+        if (signature !== lastDatabaseHealthError) {
+          console.error("Database health check failed: " + signature);
+          lastDatabaseHealthError = signature;
+        }
       }
 
       const ready = appState.initialized && databaseConnected;
