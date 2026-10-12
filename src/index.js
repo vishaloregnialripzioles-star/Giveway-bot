@@ -493,13 +493,21 @@ async function processDueGiveaways(client, store) {
 async function processPendingAnnouncements(client, store) {
   const giveaways = await store.pendingAnnouncements();
   for (const giveaway of giveaways) {
-    const winners = giveaway.last_winner_ids ?? [];
-    await require("./giveaways").publishWinners(
-      client,
-      store,
-      { state: "ended", giveaway, winners, entrantCount: await store.entryCount(giveaway.id) },
-      { reroll: giveaway.last_draw_is_reroll },
-    );
+    // Older rows may predate last_winner_ids; preserve their original winner list.
+    const winners = giveaway.last_winner_ids?.length
+      ? giveaway.last_winner_ids
+      : giveaway.winner_ids ?? [];
+    try {
+      await require("./giveaways").publishWinners(
+        client,
+        store,
+        { state: "ended", giveaway, winners, entrantCount: await store.entryCount(giveaway.id) },
+        { reroll: giveaway.last_draw_is_reroll },
+      );
+    } catch (error) {
+      // A single broken/missing channel must not block recovery for other giveaways.
+      console.error(`Could not recover winner announcement for giveaway #${giveaway.id}:`, error.message);
+    }
   }
 }
 
