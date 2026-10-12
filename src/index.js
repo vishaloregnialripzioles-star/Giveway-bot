@@ -188,6 +188,14 @@ function configureClient(client, config, store, appState, server) {
   
     client.on(Events.InteractionCreate, async (interaction) => {
       try {
+        if (interaction.isChatInputCommand()) {
+          const subcommand = interaction.options?.getSubcommand(false);
+          console.log("Received slash interaction:", JSON.stringify({
+            command: interaction.commandName,
+            subcommand: subcommand || null,
+            guildId: interaction.guildId || null,
+          }));
+        }
         if (interaction.isChatInputCommand() && interaction.commandName === "ping") {
           const gatewayLatency = client.ws.ping;
           await interaction.reply({

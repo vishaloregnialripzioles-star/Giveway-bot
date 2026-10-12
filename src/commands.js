@@ -2,6 +2,7 @@ const {
   ChannelType,
   PermissionFlagsBits,
   SlashCommandBuilder,
+  MessageFlags,
 } = require("discord.js");
 
 const giveawayCommand = new SlashCommandBuilder()
@@ -96,10 +97,13 @@ const commandData = [giveawayCommand.toJSON(), pingCommand.toJSON()];
 
 async function handleGiveawayCommand(interaction, { store, client }) {
   if (!interaction.inGuild()) {
-    await interaction.reply({ content: "Giveaways can only be managed inside a server.", ephemeral: true });
+    await interaction.reply({ content: "Giveaways can only be managed inside a server.", flags: MessageFlags.Ephemeral });
     return;
   }
 
+  // Acknowledge the interaction before database/API work so Discord's 3-second
+  // initial-response deadline cannot expire while a giveaway operation runs.
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const subcommand = interaction.options.getSubcommand();
   if (subcommand === "create") {
     await createGiveaway(interaction, store);
@@ -114,7 +118,6 @@ async function handleGiveawayCommand(interaction, { store, client }) {
     return;
   }
 
-  await interaction.deferReply({ ephemeral: true });
   const messageId = interaction.options.getString("message_id", true);
   const giveaway = await store.getByMessage(interaction.guildId, messageId);
   if (!giveaway) {
@@ -183,7 +186,7 @@ async function handleGiveawayCommand(interaction, { store, client }) {
 
 async function createGiveaway(interaction, store) {
   if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
-    await interaction.reply({ content: "You need the Manage Server permission to create giveaways.", ephemeral: true });
+    await interaction.editReply({ content: "You need the Manage Server permission to create giveaways.", ephemeral: true });
     return;
   }
 
@@ -193,18 +196,18 @@ async function createGiveaway(interaction, store) {
   try {
     duration = parseDuration(interaction.options.getString("duration", true));
   } catch (error) {
-    await interaction.reply({ content: error.message, ephemeral: true });
+    await interaction.editReply({ content: error.message, ephemeral: true });
     return;
   }
 
   const prize = interaction.options.getString("prize", true).trim();
   if (!prize) {
-    await interaction.reply({ content: "Prize cannot be empty.", ephemeral: true });
+    await interaction.editReply({ content: "Prize cannot be empty.", ephemeral: true });
     return;
   }
   const channel = interaction.options.getChannel("channel") ?? interaction.channel;
   if (!channel?.isTextBased() || !channel.messages) {
-    await interaction.reply({ content: "Choose a text channel I can post in.", ephemeral: true });
+    await interaction.editReply({ content: "Choose a text channel I can post in.", ephemeral: true });
     return;
   }
 
@@ -223,7 +226,6 @@ async function createGiveaway(interaction, store) {
     status: "active",
   };
 
-  await interaction.deferReply({ ephemeral: true });
   const message = await channel.send({
     embeds: [makeGiveawayEmbed(temporary, 0)],
     components: entryButtons("pending"),
@@ -258,7 +260,6 @@ async function createGiveaway(interaction, store) {
 }
 
 async function listGiveaways(interaction, store) {
-  await interaction.deferReply({ ephemeral: true });
   const giveaways = await store.listGuild(interaction.guildId);
   if (!giveaways.length) {
     await interaction.editReply("There are no active or paused giveaways in this server.");
@@ -275,7 +276,6 @@ async function listGiveaways(interaction, store) {
 }
 
 async function showParticipants(interaction, store) {
-  await interaction.deferReply({ ephemeral: true });
   const messageId = interaction.options.getString("message_id", true);
   const giveaway = await store.getByMessage(interaction.guildId, messageId);
   if (!giveaway) {
