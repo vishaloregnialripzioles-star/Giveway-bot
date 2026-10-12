@@ -48,22 +48,33 @@ function createHealthServer(client) {
 
 function commandsMatch(current, desired) {
   if (!Array.isArray(current) || current.length !== desired.length) return false;
-  const normalize = (command) => ({
-    name: command.name,
-    description: command.description,
-    type: command.type ?? 1,
-    options: (command.options ?? []).map((option) => ({
+  const normalizeOption = (option) => {
+    const normalized = {
       name: option.name,
       description: option.description,
       type: option.type,
       required: option.required === true,
-      ...(option.options?.length ? { options: option.options.map((nested) => ({
-        name: nested.name,
-        description: nested.description,
-        type: nested.type,
-        required: nested.required === true,
-      })) } : {}),
-    })),
+    };
+    if (Array.isArray(option.options) && option.options.length) {
+      normalized.options = option.options.map(normalizeOption);
+    }
+    if (Array.isArray(option.choices) && option.choices.length) {
+      normalized.choices = option.choices.map(({ name, value }) => ({ name, value }));
+    }
+    if (Array.isArray(option.channel_types) && option.channel_types.length) {
+      normalized.channel_types = [...option.channel_types].sort((a, b) => a - b);
+    }
+    for (const key of ["min_value", "max_value", "min_length", "max_length"]) {
+      if (option[key] !== undefined && option[key] !== null) normalized[key] = option[key];
+    }
+    if (option.autocomplete === true) normalized.autocomplete = true;
+    return normalized;
+  };
+  const normalize = (command) => ({
+    name: command.name,
+    description: command.description,
+    type: command.type ?? 1,
+    options: (command.options ?? []).map(normalizeOption),
   });
   const currentByName = new Map(current.map((command) => [command.name, command]));
   return desired.every((command) => {
@@ -76,7 +87,7 @@ async function registerCommands(config, client) {
   const rest = new REST({ version: "10" }).setToken(config.token);
   const guildIds = config.guildId
     ? [config.guildId]
-    : [...new Set(client.guilds.cache.keys())];
+    : [...new Set(client?.guilds?.cache?.keys?.() ?? [])];
 
   if (guildIds.length) {
     for (const guildId of guildIds) {
@@ -170,7 +181,7 @@ async function main() {
 
 function safeError(error) {
   return String(error?.message || error || "Unknown error")
-    .replace(/[\\r\\n]+/g, " ")
+    .replace(/\s+/g, " ")
     .replace(/\b[\w-]{24}\.[\w-]{6}\.[\w-]{25,}\b/g, "[redacted token]")
     .slice(0, 300);
 }
