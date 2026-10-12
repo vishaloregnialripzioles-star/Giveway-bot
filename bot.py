@@ -32,22 +32,22 @@ def run_health_server():
 
 threading.Thread(target=run_health_server, daemon=True, name="health-server").start()
 
-client = discord.Client(intents=discord.Intents.none())
-tree = app_commands.CommandTree(client)
-commands_synced = False
+def create_bot():
+    client = discord.Client(intents=discord.Intents.none())
+    tree = app_commands.CommandTree(client)
+    synced = False
 
-@tree.command(name="ping", description="Check whether the bot is online.")
-async def ping(interaction: discord.Interaction):
-    latency_ms = round(client.latency * 1000)
-    await interaction.response.send_message(f"🏓 Pong! Latency: {latency_ms} ms")
+    @tree.command(name="ping", description="Check whether the bot is online.")
+    async def ping(interaction: discord.Interaction):
+        latency_ms = round(client.latency * 1000)
+        await interaction.response.send_message(f"🏓 Pong! Latency: {latency_ms} ms")
 
-@client.event
-async def on_ready():
-    global commands_synced
-    log.info("Discord connected as %s (ID: %s)", client.user, client.user.id)
-    if commands_synced:
-        return
-    try:
+    @client.event
+    async def on_ready():
+        nonlocal synced
+        log.info("Discord connected as %s (ID: %s)", client.user, client.user.id)
+        if synced:
+            return
         if GUILD_ID:
             guild = discord.Object(id=int(GUILD_ID))
             tree.clear_commands(guild=guild)
@@ -56,23 +56,27 @@ async def on_ready():
             log.info("Synced %d command(s) to guild %s.", len(guild_commands), GUILD_ID)
         global_commands = await tree.sync()
         log.info("Synced %d global command(s). Only /ping is defined.", len(global_commands))
-        commands_synced = True
-    except Exception:
-        log.exception("Discord connected, but command sync failed.")
-        raise
+        synced = True
+
+    return client
 
 async def main():
-    delay = 30
+    delay = 120
     while True:
+        client = create_bot()
         try:
             await client.start(TOKEN, reconnect=True)
             return
         except discord.HTTPException as exc:
+            await client.close()
             if exc.status != 429:
                 raise
-            log.warning("Discord login rate-limited (HTTP 429); retrying in %s seconds.", delay)
+            log.warning("Discord login rate-limited (HTTP 429); retrying with a fresh client in %s seconds.", delay)
             await asyncio.sleep(delay)
-            delay = min(delay * 2, 600)
+            delay = min(delay * 2, 900)
+        except Exception:
+            await client.close()
+            raise
 
 if __name__ == "__main__":
     asyncio.run(main())
