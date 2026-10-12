@@ -4573,7 +4573,25 @@ def main():
         f"0.0.0.0:{os.getenv('PORT', '10000')}"
     )
 
-    bot.run(TOKEN)
+    async def run_discord_with_backoff():
+        # Discord's edge may temporarily return HTTP 429 / Cloudflare 1015
+        # during deployments. Keep the health server alive and retry slowly.
+        delay = 60
+        while True:
+            try:
+                await bot.start(TOKEN, reconnect=True)
+                return
+            except discord.HTTPException as exc:
+                if exc.status != 429:
+                    raise
+                print(
+                    f"⚠️ Discord login rate-limited (HTTP 429). "
+                    f"Retrying in {delay} seconds."
+                )
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 600)
+
+    asyncio.run(run_discord_with_backoff())
 
 
 # =========================================================
