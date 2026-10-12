@@ -287,41 +287,80 @@ async function registerCommandsWithRetry(config, client) {
   }
 }
 
-async function registerCommands(config, client) {
-  // Register to each connected guild when GUILD_ID is not configured. Guild
-  // commands become available immediately instead of waiting for global-command propagation.
-  const guildIds = config.guildId
-    ? [config.guildId]
-    : [...new Set(client?.guilds?.cache?.keys?.() ?? [])];
-  if (guildIds.length) {
-    console.log(`Registering ${commandData.length} slash commands to ${guildIds.length} guild(s)...`);
-    for (const guildId of guildIds) {
-      const route = Routes.applicationGuildCommands(config.clientId, guildId);
-      const registered = await discordApiRequest(route, config.token, commandData);
-      console.log(`Discord accepted ${Array.isArray(registered) ? registered.length : commandData.length} slash command(s) for guild ${guildId}.`);
-    }
+async function registerCommands(config) {
+  // Global registration is the production default. Set GUILD_ID only when
+  // intentionally testing in one server; never fan out writes to every cached guild.
+  const isGuild = Boolean(config.guildId);
+  const route = isGuild
+    ? Routes.applicationGuildCommands(config.clientId, config.guildId)
+    : Routes.applicationCommands(config.clientId);
+  const scope = isGuild ? `guild ${config.guildId}` : "globally";
+
+  // Read first so a restart/redeploy does not repeatedly PUT identical command
+  // definitions and consume Discord's command-registration rate limit.
+  const current = await discordApiRequest(route, config.token, undefined, "GET");
+  if (commandsMatch(current, commandData)) {
+    console.log(`Slash commands already match Discord's registered commands (${scope}); skipping write.`);
     return;
   }
 
-  const route = Routes.applicationCommands(config.clientId);
-  console.log(`No guilds are cached; registering ${commandData.length} slash commands globally...`);
-  const registered = await discordApiRequest(route, config.token, commandData);
-  console.log(`Discord accepted ${Array.isArray(registered) ? registered.length : commandData.length} global slash command(s).`);
+  console.log(`Registering ${commandData.length} slash commands ${scope}...`);
+  const registered = await discordApiRequest(route, config.token, commandData, "PUT");
+  console.log(`Discord accepted ${Array.isArray(registered) ? registered.length : commandData.length} slash command(s) ${scope}.`);
 }
 
-function discordApiRequest(route, token, body) {
+function commandsMatch(current, desired) {
+  if (!Array.isArray(current) || current.length !== desired.length) return false;
+  const normalizeOption = (option) => {
+    const normalized = {
+      name: option.name,
+      description: option.description,
+      type: option.type,
+      required: option.required === true,
+    };
+    if (Array.isArray(option.options) && option.options.length) {
+      normalized.options = option.options.map(normalizeOption);
+    }
+    if (Array.isArray(option.choices) && option.choices.length) {
+      normalized.choices = option.choices.map(({ name, value }) => ({ name, value }));
+    }
+    if (Array.isArray(option.channel_types) && option.channel_types.length) {
+      normalized.channel_types = [...option.channel_types].sort((a, b) => a - b);
+    }
+    for (const key of ["min_value", "max_value", "min_length", "max_length"]) {
+      if (option[key] !== undefined && option[key] !== null) normalized[key] = option[key];
+    }
+    if (option.autocomplete === true) normalized.autocomplete = true;
+    return normalized;
+  };
+  const normalizeCommand = (command) => ({
+    name: command.name,
+    description: command.description,
+    type: command.type ?? 1,
+    options: (command.options ?? []).map(normalizeOption),
+  });
+  const currentByName = new Map(current.map((command) => [command.name, command]));
+  return desired.every((command) => {
+    const existing = currentByName.get(command.name);
+    return existing && JSON.stringify(normalizeCommand(existing)) === JSON.stringify(normalizeCommand(command));
+  });
+}
+
+function discordApiRequest(route, token, body, method = "PUT") {
   return new Promise((resolve, reject) => {
-    const payload = JSON.stringify(body);
+    const hasBody = body !== undefined && body !== null;
+    const payload = hasBody ? JSON.stringify(body) : "";
+    const headers = { Authorization: `Bot ${token}` };
+    if (hasBody) {
+      headers["Content-Type"] = "application/json";
+      headers["Content-Length"] = Buffer.byteLength(payload);
+    }
     const request = https.request({
       hostname: "discord.com",
       path: `/api/v10${route}`,
-      method: "PUT",
+      method,
       timeout: 12_000,
-      headers: {
-        Authorization: `Bot ${token}`,
-        "Content-Type": "application/json",
-        "Content-Length": Buffer.byteLength(payload),
-      },
+      headers,
     }, (response) => {
       let responseBody = "";
       response.setEncoding("utf8");
@@ -333,16 +372,20 @@ function discordApiRequest(route, token, body) {
           resolve(data);
           return;
         }
-        const retryAfter = Number(response.headers["retry-after"]);
+        const headerRetry = Number(response.headers["retry-after"]);
+        const bodyRetry = Number(data?.retry_after);
+        const retryAfter = Number.isFinite(headerRetry) && headerRetry > 0
+          ? headerRetry
+          : Number.isFinite(bodyRetry) && bodyRetry > 0 ? bodyRetry : 0;
         const details = typeof data?.message === "string" ? data.message : "Discord returned an error response.";
-        const error = new Error(`Discord API HTTP ${response.statusCode}${Number.isFinite(retryAfter) && retryAfter > 0 ? ` (retry-after ${retryAfter}s)` : ""}: ${details.slice(0, 180)}`);
-        if (Number.isFinite(retryAfter) && retryAfter > 0) error.retryAfterMs = retryAfter * 1_000;
+        const error = new Error(`Discord API HTTP ${response.statusCode}${retryAfter > 0 ? ` (retry-after ${retryAfter}s)` : ""}: ${details.slice(0, 180)}`);
+        if (retryAfter > 0) error.retryAfterMs = retryAfter * 1_000;
         reject(error);
       });
     });
-    request.on("timeout", () => request.destroy(new Error("Discord API command registration timed out after 12 seconds.")));
+    request.on("timeout", () => request.destroy(new Error("Discord API command request timed out after 12 seconds.")));
     request.on("error", (error) => reject(error));
-    request.end(payload);
+    request.end(hasBody ? payload : undefined);
   });
 }
 
@@ -450,6 +493,7 @@ module.exports = {
   processPendingAnnouncements,
   processDueGiveaways,
   registerCommands,
+  commandsMatch,
 };
 
 if (require.main === module) {
