@@ -187,6 +187,7 @@ function configureClient(client, config, store, appState, server) {
     });
   
     client.on(Events.InteractionCreate, async (interaction) => {
+      installDirectInteractionResponses(interaction);
       try {
         if (interaction.isChatInputCommand()) {
           const subcommand = interaction.options?.getSubcommand(false);
@@ -251,6 +252,103 @@ function configureClient(client, config, store, appState, server) {
     client.on(Events.ShardReady, (shardId) => {
       console.log("Discord shard " + shardId + " ready.");
     });
+}
+
+// Send interaction acknowledgements directly over HTTPS rather than through
+// discord.js's shared REST queue. This keeps Discord's 3-second acknowledgement
+// deadline independent of unrelated REST route cooldowns.
+function installDirectInteractionResponses(interaction) {
+  if (interaction.__directResponsesInstalled) return;
+  Object.defineProperty(interaction, "__directResponsesInstalled", { value: true });
+
+  interaction.reply = async function (options) {
+    const data = normalizeInteractionPayload(options);
+    await directDiscordRequest(
+      `/interactions/${this.id}/${this.token}/callback`,
+      "POST",
+      { type: 4, data },
+      2_500,
+    );
+    this.deferred = false;
+    this.replied = true;
+    this.ephemeral = Boolean(data.flags & MessageFlags.Ephemeral);
+    return this;
+  };
+
+  interaction.deferReply = async function (options = {}) {
+    const flags = options.flags ?? (options.ephemeral ? MessageFlags.Ephemeral : undefined);
+    const data = flags === undefined ? {} : { flags };
+    await directDiscordRequest(
+      `/interactions/${this.id}/${this.token}/callback`,
+      "POST",
+      { type: 5, data },
+      2_500,
+    );
+    this.deferred = true;
+    this.replied = false;
+    this.ephemeral = Boolean(flags & MessageFlags.Ephemeral);
+    return this;
+  };
+
+  interaction.editReply = async function (options) {
+    return directDiscordRequest(
+      `/webhooks/${this.applicationId}/${this.token}/messages/@original`,
+      "PATCH",
+      normalizeInteractionPayload(options),
+      8_000,
+    );
+  };
+
+  interaction.followUp = async function (options) {
+    return directDiscordRequest(
+      `/webhooks/${this.applicationId}/${this.token}`,
+      "POST",
+      normalizeInteractionPayload(options),
+      8_000,
+    );
+  };
+}
+
+function normalizeInteractionPayload(options) {
+  const data = typeof options === "string" ? { content: options } : { ...(options || {}) };
+  if (data.ephemeral) {
+    data.flags = (data.flags || 0) | MessageFlags.Ephemeral;
+    delete data.ephemeral;
+  }
+  return data;
+}
+
+function directDiscordRequest(path, method, body, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body);
+    const request = https.request({
+      hostname: "discord.com",
+      path: `/api/v10${path}`,
+      method,
+      timeout: timeoutMs,
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(payload),
+      },
+    }, (response) => {
+      let responseBody = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => { responseBody += chunk; });
+      response.on("end", () => {
+        let result = null;
+        try { result = responseBody ? JSON.parse(responseBody) : null; } catch {}
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          resolve(result);
+          return;
+        }
+        const detail = typeof result?.message === "string" ? result.message : "Discord returned an error.";
+        reject(new Error(`Discord interaction API HTTP ${response.statusCode}: ${detail.slice(0, 180)}`));
+      });
+    });
+    request.on("timeout", () => request.destroy(new Error(`Discord interaction request timed out after ${timeoutMs}ms.`)));
+    request.on("error", reject);
+    request.end(payload);
+  });
 }
 
 function withTimeout(promise, timeoutMs, message) {
