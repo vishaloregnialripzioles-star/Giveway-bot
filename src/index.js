@@ -156,7 +156,7 @@ function configureClient(client, config, store, appState, server) {
       try {
         console.log(`Logged in as ${readyClient.user.tag}`);
         // Register commands independently: REST rate limits must not take the Gateway bot offline.
-        registerCommandsWithRetry(config, readyClient).catch((error) => {
+        registerCommandsWithRetry(config, readyClient, store).catch((error) => {
           console.error("Slash command registration retry worker stopped:", error.message);
         });
         let schedulerBusy = false;
@@ -261,23 +261,40 @@ function withTimeout(promise, timeoutMs, message) {
   });
 }
 
-async function registerCommandsWithRetry(config, client) {
+async function registerCommandsWithRetry(config, client, store) {
+  const settingKey = "slash_command_retry_after";
   console.log("Slash command registration worker started.");
   let delayMs = 60_000;
+
   while (client.isReady()) {
     try {
+      // Persist the cooldown in PostgreSQL so a Render restart or sleep/wake
+      // cannot cause another write before Discord's Retry-After has elapsed.
+      const savedDeadline = Number(await store.getSetting(settingKey));
+      if (Number.isFinite(savedDeadline) && savedDeadline > Date.now()) {
+        const remainingMs = savedDeadline - Date.now() + 1_000;
+        console.warn(`Slash command registration is cooling down; next attempt in ${Math.ceil(remainingMs / 1_000)} seconds.`);
+        await new Promise((resolve) => setTimeout(resolve, remainingMs));
+        if (!client.isReady()) return;
+      }
+
       await registerCommands(config, client);
+      await store.setSetting(settingKey, null);
       console.log("Slash command registration completed successfully.");
       return;
     } catch (error) {
       const message = String(error?.message || error)
-        .replace(/[\\r\\n]+/g, " ")
-        .replace(/\\b[\\w-]{24}\\.[\\w-]{6}\\.[\\w-]{25,}\\b/g, "[redacted token]")
+        .replace(/[\r\n]+/g, " ")
+        .replace(/\b[\w-]{24}\.[\w-]{6}\.[\w-]{25,}\b/g, "[redacted token]")
         .slice(0, 250);
       const retryAfterMs = Number(error?.retryAfterMs);
       const waitMs = Number.isFinite(retryAfterMs) && retryAfterMs > 0
-        ? Math.min(retryAfterMs + 1_000, 24 * 60 * 60_000)
+        ? retryAfterMs + 1_000
         : delayMs;
+      const retryAt = Date.now() + waitMs;
+      await store.setSetting(settingKey, String(retryAt)).catch((storeError) => {
+        console.error("Could not persist slash command cooldown:", storeError.message);
+      });
       console.error(`Slash command registration failed; bot remains online and will retry in ${Math.ceil(waitMs / 1_000)} seconds:`, message);
       await new Promise((resolve) => setTimeout(resolve, waitMs));
       if (!(Number.isFinite(retryAfterMs) && retryAfterMs > 0)) {
@@ -288,40 +305,86 @@ async function registerCommandsWithRetry(config, client) {
 }
 
 async function registerCommands(config, client) {
-  // Register to each connected guild when GUILD_ID is not configured. Guild
-  // commands become available immediately instead of waiting for global-command propagation.
+  // GUILD_ID targets one server explicitly. Otherwise update each server this
+  // bot is connected to for immediate command visibility; fall back to global
+  // registration only if no guild is available.
   const guildIds = config.guildId
     ? [config.guildId]
     : [...new Set(client?.guilds?.cache?.keys?.() ?? [])];
-  if (guildIds.length) {
-    console.log(`Registering ${commandData.length} slash commands to ${guildIds.length} guild(s)...`);
-    for (const guildId of guildIds) {
-      const route = Routes.applicationGuildCommands(config.clientId, guildId);
-      const registered = await discordApiRequest(route, config.token, commandData);
-      console.log(`Discord accepted ${Array.isArray(registered) ? registered.length : commandData.length} slash command(s) for guild ${guildId}.`);
-    }
-    return;
-  }
+  const targets = guildIds.length
+    ? guildIds.map((guildId) => ({
+      route: Routes.applicationGuildCommands(config.clientId, guildId),
+      scope: `guild ${guildId}`,
+    }))
+    : [{ route: Routes.applicationCommands(config.clientId), scope: "globally" }];
 
-  const route = Routes.applicationCommands(config.clientId);
-  console.log(`No guilds are cached; registering ${commandData.length} slash commands globally...`);
-  const registered = await discordApiRequest(route, config.token, commandData);
-  console.log(`Discord accepted ${Array.isArray(registered) ? registered.length : commandData.length} global slash command(s).`);
+  for (const target of targets) {
+    // Read first so a restart/redeploy does not repeatedly PUT identical command
+    // definitions and consume Discord's command-registration rate limit.
+    const current = await discordApiRequest(target.route, config.token, undefined, "GET");
+    if (commandsMatch(current, commandData)) {
+      console.log(`Slash commands already match Discord's registered commands (${target.scope}); skipping write.`);
+      continue;
+    }
+
+    console.log(`Registering ${commandData.length} slash commands ${target.scope}...`);
+    const registered = await discordApiRequest(target.route, config.token, commandData, "PUT");
+    console.log(`Discord accepted ${Array.isArray(registered) ? registered.length : commandData.length} slash command(s) ${target.scope}.`);
+  }
 }
 
-function discordApiRequest(route, token, body) {
+function commandsMatch(current, desired) {
+  if (!Array.isArray(current) || current.length !== desired.length) return false;
+  const normalizeOption = (option) => {
+    const normalized = {
+      name: option.name,
+      description: option.description,
+      type: option.type,
+      required: option.required === true,
+    };
+    if (Array.isArray(option.options) && option.options.length) {
+      normalized.options = option.options.map(normalizeOption);
+    }
+    if (Array.isArray(option.choices) && option.choices.length) {
+      normalized.choices = option.choices.map(({ name, value }) => ({ name, value }));
+    }
+    if (Array.isArray(option.channel_types) && option.channel_types.length) {
+      normalized.channel_types = [...option.channel_types].sort((a, b) => a - b);
+    }
+    for (const key of ["min_value", "max_value", "min_length", "max_length"]) {
+      if (option[key] !== undefined && option[key] !== null) normalized[key] = option[key];
+    }
+    if (option.autocomplete === true) normalized.autocomplete = true;
+    return normalized;
+  };
+  const normalizeCommand = (command) => ({
+    name: command.name,
+    description: command.description,
+    type: command.type ?? 1,
+    options: (command.options ?? []).map(normalizeOption),
+  });
+  const currentByName = new Map(current.map((command) => [command.name, command]));
+  return desired.every((command) => {
+    const existing = currentByName.get(command.name);
+    return existing && JSON.stringify(normalizeCommand(existing)) === JSON.stringify(normalizeCommand(command));
+  });
+}
+
+function discordApiRequest(route, token, body, method = "PUT") {
   return new Promise((resolve, reject) => {
-    const payload = JSON.stringify(body);
+    const hasBody = body !== undefined && body !== null;
+    const payload = hasBody ? JSON.stringify(body) : "";
+    const headers = { Authorization: `Bot ${token}` };
+    if (hasBody) {
+      headers["Content-Type"] = "application/json";
+      headers["Content-Length"] = Buffer.byteLength(payload);
+    }
     const request = https.request({
       hostname: "discord.com",
       path: `/api/v10${route}`,
-      method: "PUT",
+      method,
       timeout: 12_000,
-      headers: {
-        Authorization: `Bot ${token}`,
-        "Content-Type": "application/json",
-        "Content-Length": Buffer.byteLength(payload),
-      },
+      headers,
     }, (response) => {
       let responseBody = "";
       response.setEncoding("utf8");
@@ -333,16 +396,20 @@ function discordApiRequest(route, token, body) {
           resolve(data);
           return;
         }
-        const retryAfter = Number(response.headers["retry-after"]);
+        const headerRetry = Number(response.headers["retry-after"]);
+        const bodyRetry = Number(data?.retry_after);
+        const retryAfter = Number.isFinite(headerRetry) && headerRetry > 0
+          ? headerRetry
+          : Number.isFinite(bodyRetry) && bodyRetry > 0 ? bodyRetry : 0;
         const details = typeof data?.message === "string" ? data.message : "Discord returned an error response.";
-        const error = new Error(`Discord API HTTP ${response.statusCode}${Number.isFinite(retryAfter) && retryAfter > 0 ? ` (retry-after ${retryAfter}s)` : ""}: ${details.slice(0, 180)}`);
-        if (Number.isFinite(retryAfter) && retryAfter > 0) error.retryAfterMs = retryAfter * 1_000;
+        const error = new Error(`Discord API HTTP ${response.statusCode}${retryAfter > 0 ? ` (retry-after ${retryAfter}s)` : ""}: ${details.slice(0, 180)}`);
+        if (retryAfter > 0) error.retryAfterMs = retryAfter * 1_000;
         reject(error);
       });
     });
-    request.on("timeout", () => request.destroy(new Error("Discord API command registration timed out after 12 seconds.")));
+    request.on("timeout", () => request.destroy(new Error("Discord API command request timed out after 12 seconds.")));
     request.on("error", (error) => reject(error));
-    request.end(payload);
+    request.end(hasBody ? payload : undefined);
   });
 }
 
@@ -426,13 +493,21 @@ async function processDueGiveaways(client, store) {
 async function processPendingAnnouncements(client, store) {
   const giveaways = await store.pendingAnnouncements();
   for (const giveaway of giveaways) {
-    const winners = giveaway.last_winner_ids ?? [];
-    await require("./giveaways").publishWinners(
-      client,
-      store,
-      { state: "ended", giveaway, winners, entrantCount: await store.entryCount(giveaway.id) },
-      { reroll: giveaway.last_draw_is_reroll },
-    );
+    // Older rows may predate last_winner_ids; preserve their original winner list.
+    const winners = giveaway.last_winner_ids?.length
+      ? giveaway.last_winner_ids
+      : giveaway.winner_ids ?? [];
+    try {
+      await require("./giveaways").publishWinners(
+        client,
+        store,
+        { state: "ended", giveaway, winners, entrantCount: await store.entryCount(giveaway.id) },
+        { reroll: giveaway.last_draw_is_reroll },
+      );
+    } catch (error) {
+      // A single broken/missing channel must not block recovery for other giveaways.
+      console.error(`Could not recover winner announcement for giveaway #${giveaway.id}:`, error.message);
+    }
   }
 }
 
@@ -450,6 +525,7 @@ module.exports = {
   processPendingAnnouncements,
   processDueGiveaways,
   registerCommands,
+  commandsMatch,
 };
 
 if (require.main === module) {

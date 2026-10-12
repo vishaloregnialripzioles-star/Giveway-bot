@@ -57,7 +57,32 @@ function createStore({ connectionString, ssl }) {
 
       CREATE INDEX IF NOT EXISTS giveaway_entries_user_idx
         ON giveaway_entries (user_id);
+
+      CREATE TABLE IF NOT EXISTS bot_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
     `);
+  }
+
+  async function getSetting(key) {
+    const result = await pool.query("SELECT value FROM bot_settings WHERE key = $1", [key]);
+    return result.rows[0]?.value ?? null;
+  }
+
+  async function setSetting(key, value) {
+    if (value === null || value === undefined || value === "") {
+      await pool.query("DELETE FROM bot_settings WHERE key = $1", [key]);
+      return;
+    }
+    await pool.query(
+      `INSERT INTO bot_settings (key, value, updated_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (key) DO UPDATE
+       SET value = EXCLUDED.value, updated_at = NOW()`,
+      [key, String(value)],
+    );
   }
 
   async function health() {
@@ -358,6 +383,7 @@ function createStore({ connectionString, ssl }) {
     finish,
     getById,
     getByMessage,
+    getSetting,
     health,
     initialize,
     join,
@@ -369,6 +395,7 @@ function createStore({ connectionString, ssl }) {
     pendingAnnouncements,
     reroll,
     resume,
+    setSetting,
   };
 }
 

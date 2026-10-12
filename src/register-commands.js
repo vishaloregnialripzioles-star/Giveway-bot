@@ -1,18 +1,17 @@
-const { REST, Routes } = require("discord.js");
 const { loadConfig } = require("./config");
-const { commandData } = require("./commands");
+const { registerCommands } = require("./index");
 
 async function main() {
   const config = loadConfig();
-  const rest = new REST({ version: "10" }).setToken(config.token);
-  const route = config.guildId
-    ? Routes.applicationGuildCommands(config.clientId, config.guildId)
-    : Routes.applicationCommands(config.clientId);
-  await rest.put(route, { body: commandData });
-  console.log(`Registered giveaway slash commands${config.guildId ? ` for guild ${config.guildId}` : " globally"}.`);
+  await registerCommands(config);
+  console.log("Slash command registration check completed.");
 }
 
 main().catch((error) => {
-  console.error("Could not register commands:", error.message);
+  const message = String(error?.message || error)
+    .replace(/[\r\n]+/g, " ")
+    .replace(/\b[\w-]{24}\.[\w-]{6}\.[\w-]{25,}\b/g, "[redacted token]")
+    .slice(0, 300);
+  console.error("Could not register commands:", message);
   process.exitCode = 1;
 });
