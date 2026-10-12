@@ -156,7 +156,7 @@ function configureClient(client, config, store, appState, server) {
       try {
         console.log(`Logged in as ${readyClient.user.tag}`);
         // Register commands independently: REST rate limits must not take the Gateway bot offline.
-        registerCommandsWithRetry(config, readyClient).catch((error) => {
+        registerCommandsWithRetry(config, readyClient, store).catch((error) => {
           console.error("Slash command registration retry worker stopped:", error.message);
         });
         let schedulerBusy = false;
@@ -261,23 +261,40 @@ function withTimeout(promise, timeoutMs, message) {
   });
 }
 
-async function registerCommandsWithRetry(config, client) {
+async function registerCommandsWithRetry(config, client, store) {
+  const settingKey = "slash_command_retry_after";
   console.log("Slash command registration worker started.");
   let delayMs = 60_000;
+
   while (client.isReady()) {
     try {
+      // Persist the cooldown in PostgreSQL so a Render restart or sleep/wake
+      // cannot cause another write before Discord's Retry-After has elapsed.
+      const savedDeadline = Number(await store.getSetting(settingKey));
+      if (Number.isFinite(savedDeadline) && savedDeadline > Date.now()) {
+        const remainingMs = savedDeadline - Date.now() + 1_000;
+        console.warn(`Slash command registration is cooling down; next attempt in ${Math.ceil(remainingMs / 1_000)} seconds.`);
+        await new Promise((resolve) => setTimeout(resolve, remainingMs));
+        if (!client.isReady()) return;
+      }
+
       await registerCommands(config, client);
+      await store.setSetting(settingKey, null);
       console.log("Slash command registration completed successfully.");
       return;
     } catch (error) {
       const message = String(error?.message || error)
-        .replace(/[\\r\\n]+/g, " ")
-        .replace(/\\b[\\w-]{24}\\.[\\w-]{6}\\.[\\w-]{25,}\\b/g, "[redacted token]")
+        .replace(/[\r\n]+/g, " ")
+        .replace(/\b[\w-]{24}\.[\w-]{6}\.[\w-]{25,}\b/g, "[redacted token]")
         .slice(0, 250);
       const retryAfterMs = Number(error?.retryAfterMs);
       const waitMs = Number.isFinite(retryAfterMs) && retryAfterMs > 0
-        ? Math.min(retryAfterMs + 1_000, 24 * 60 * 60_000)
+        ? retryAfterMs + 1_000
         : delayMs;
+      const retryAt = Date.now() + waitMs;
+      await store.setSetting(settingKey, String(retryAt)).catch((storeError) => {
+        console.error("Could not persist slash command cooldown:", storeError.message);
+      });
       console.error(`Slash command registration failed; bot remains online and will retry in ${Math.ceil(waitMs / 1_000)} seconds:`, message);
       await new Promise((resolve) => setTimeout(resolve, waitMs));
       if (!(Number.isFinite(retryAfterMs) && retryAfterMs > 0)) {
