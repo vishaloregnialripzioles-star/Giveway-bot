@@ -19,7 +19,49 @@ const commandData = [
     .toJSON(),
 ];
 
-function createHealthServer(client) {
+function createClient() {
+  const client = new Client({
+    intents: [GatewayIntentBits.Guilds],
+    rest: { timeout: 15_000 },
+    ws: {
+      fetchGatewayInformation: async () => ({
+        url: "wss://gateway.discord.gg",
+        shards: 1,
+        session_start_limit: {
+          total: 1000,
+          remaining: 1000,
+          reset_after: 86_400_000,
+          max_concurrency: 1,
+        },
+      }),
+    },
+  });
+
+  // Keep startup independent from Discord's /gateway/bot REST discovery route.
+  const rest = client.rest;
+  const originalGet = rest.get.bind(rest);
+  const gatewayRoute = Routes.gatewayBot();
+  rest.get = function (route, ...args) {
+    const routePath = typeof route === "string" ? route : route?.path;
+    if (routePath === gatewayRoute || routePath === "/gateway/bot") {
+      console.log("Gateway discovery intercepted locally; using direct Discord Gateway URL.");
+      return Promise.resolve({
+        url: "wss://gateway.discord.gg",
+        shards: 1,
+        session_start_limit: {
+          total: 1000,
+          remaining: 1000,
+          reset_after: 86_400_000,
+          max_concurrency: 1,
+        },
+      });
+    }
+    return originalGet(route, ...args);
+  };
+  return client;
+}
+
+function createHealthServer(getClient) {
   return http.createServer((request, response) => {
     const pathname = new URL(request.url || "/", "http://localhost").pathname;
     response.setHeader("Cache-Control", "no-store");
@@ -32,11 +74,12 @@ function createHealthServer(client) {
     }
 
     if (pathname === "/" || ["/health", "/healthz", "/ping"].includes(pathname)) {
+      const client = getClient();
       response.writeHead(200);
       response.end(JSON.stringify({
         status: "ok",
         service: "sparkxie-ping-bot",
-        discord: client.isReady() ? "connected" : "connecting",
+        discord: client?.isReady() ? "connected" : "connecting",
       }));
       return;
     }
@@ -113,20 +156,7 @@ async function registerCommands(config, client) {
   }
 }
 
-async function main() {
-  const config = loadConfig();
-  const client = new Client({
-    intents: [GatewayIntentBits.Guilds],
-    rest: { timeout: 15_000 },
-  });
-
-  const port = Number(process.env.PORT || 10000);
-  const server = createHealthServer(client);
-  server.on("error", (error) => console.error("Health server error:", error.message));
-  server.listen(port, "0.0.0.0", () => {
-    console.log("Health server listening on 0.0.0.0:" + port);
-  });
-
+function configureClient(client, config) {
   client.once(Events.ClientReady, async (readyClient) => {
     console.log("Logged in as " + readyClient.user.tag);
     try {
@@ -134,7 +164,7 @@ async function main() {
       console.log("Bot is ready. The only command enabled is /ping.");
     } catch (error) {
       console.error("Slash command sync failed:", safeError(error));
-      console.error("The bot will stay online; /ping works wherever it is already registered.");
+      console.error("The bot remains online; check command-sync errors if old commands remain visible.");
     }
   });
 
@@ -162,10 +192,83 @@ async function main() {
     }
   });
 
+  client.on(Events.Debug, (message) => {
+    const safeMessage = String(message || "")
+      .replace(/\s+/g, " ")
+      .replace(/[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{20,}/g, "[redacted token]")
+      .slice(0, 400);
+    console.log("Discord debug:", safeMessage);
+  });
   client.on(Events.Error, (error) => console.error("Discord client error:", safeError(error)));
   client.on(Events.ShardError, (error, shardId) => {
     console.error("Discord shard " + shardId + " error:", safeError(error));
   });
+  client.on(Events.ShardReady, (shardId) => console.log("Discord shard " + shardId + " ready."));
+  client.on(Events.ShardReconnecting, (shardId) => console.warn("Discord shard " + shardId + " reconnecting."));
+  client.on(Events.ShardDisconnect, (event, shardId) => {
+    console.warn("Discord shard " + shardId + " disconnected (code=" + event.code + ", clean=" + event.wasClean + ").");
+  });
+}
+
+function withTimeout(promise, timeoutMs, message) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error) => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
+
+async function main() {
+  const config = loadConfig();
+  let client = createClient();
+
+  const port = Number(process.env.PORT || 10000);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error("PORT must be an integer between 1 and 65535.");
+  }
+
+  const server = createHealthServer(() => client);
+  server.on("error", (error) => console.error("Health server error:", safeError(error)));
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, "0.0.0.0", () => {
+      server.removeListener("error", reject);
+      console.log("Health server listening on 0.0.0.0:" + port);
+      resolve();
+    });
+  });
+
+  let retryDelayMs = 5_000;
+  while (!client.isReady()) {
+    const attemptClient = client;
+    const readyPromise = attemptClient.isReady()
+      ? Promise.resolve()
+      : new Promise((resolve) => attemptClient.once(Events.ClientReady, resolve));
+    configureClient(attemptClient, config);
+
+    try {
+      console.log("Connecting to Discord Gateway...");
+      await withTimeout(
+        attemptClient.login(config.token),
+        45_000,
+        "Discord login did not complete within 45 seconds.",
+      );
+      await withTimeout(
+        readyPromise,
+        45_000,
+        "Discord Gateway did not become ready within 45 seconds.",
+      );
+      break;
+    } catch (error) {
+      console.error("Discord connection attempt failed; health server stays online:", safeError(error));
+      attemptClient.destroy();
+      client = createClient();
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+      retryDelayMs = Math.min(retryDelayMs * 2, 60_000);
+    }
+  }
 
   const shutdown = async (signal) => {
     console.log("Received " + signal + "; shutting down.");
@@ -175,8 +278,6 @@ async function main() {
   };
   process.once("SIGINT", () => void shutdown("SIGINT"));
   process.once("SIGTERM", () => void shutdown("SIGTERM"));
-
-  await client.login(config.token);
 }
 
 function safeError(error) {
