@@ -287,26 +287,33 @@ async function registerCommandsWithRetry(config, client) {
   }
 }
 
-async function registerCommands(config) {
-  // Global registration is the production default. Set GUILD_ID only when
-  // intentionally testing in one server; never fan out writes to every cached guild.
-  const isGuild = Boolean(config.guildId);
-  const route = isGuild
-    ? Routes.applicationGuildCommands(config.clientId, config.guildId)
-    : Routes.applicationCommands(config.clientId);
-  const scope = isGuild ? `guild ${config.guildId}` : "globally";
+async function registerCommands(config, client) {
+  // GUILD_ID targets one server explicitly. Otherwise update each server this
+  // bot is connected to for immediate command visibility; fall back to global
+  // registration only if no guild is available.
+  const guildIds = config.guildId
+    ? [config.guildId]
+    : [...new Set(client?.guilds?.cache?.keys?.() ?? [])];
+  const targets = guildIds.length
+    ? guildIds.map((guildId) => ({
+      route: Routes.applicationGuildCommands(config.clientId, guildId),
+      scope: `guild ${guildId}`,
+    }))
+    : [{ route: Routes.applicationCommands(config.clientId), scope: "globally" }];
 
-  // Read first so a restart/redeploy does not repeatedly PUT identical command
-  // definitions and consume Discord's command-registration rate limit.
-  const current = await discordApiRequest(route, config.token, undefined, "GET");
-  if (commandsMatch(current, commandData)) {
-    console.log(`Slash commands already match Discord's registered commands (${scope}); skipping write.`);
-    return;
+  for (const target of targets) {
+    // Read first so a restart/redeploy does not repeatedly PUT identical command
+    // definitions and consume Discord's command-registration rate limit.
+    const current = await discordApiRequest(target.route, config.token, undefined, "GET");
+    if (commandsMatch(current, commandData)) {
+      console.log(`Slash commands already match Discord's registered commands (${target.scope}); skipping write.`);
+      continue;
+    }
+
+    console.log(`Registering ${commandData.length} slash commands ${target.scope}...`);
+    const registered = await discordApiRequest(target.route, config.token, commandData, "PUT");
+    console.log(`Discord accepted ${Array.isArray(registered) ? registered.length : commandData.length} slash command(s) ${target.scope}.`);
   }
-
-  console.log(`Registering ${commandData.length} slash commands ${scope}...`);
-  const registered = await discordApiRequest(route, config.token, commandData, "PUT");
-  console.log(`Discord accepted ${Array.isArray(registered) ? registered.length : commandData.length} slash command(s) ${scope}.`);
 }
 
 function commandsMatch(current, desired) {
