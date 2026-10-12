@@ -43,10 +43,14 @@ npm start
 ```
 
 To make slash commands appear quickly in one development server, set
-`GUILD_ID` in `.env` before starting the bot. Leave it blank in production to
-register commands globally. Global command updates can take a while to appear.
-You can also run `npm run register` to register commands without starting the
-bot.
+`GUILD_ID` in `.env` before starting the bot. With `GUILD_ID` blank, the
+running bot checks the guilds it is connected to and updates those guild
+commands (falling back to global registration only if no guild is cached).
+Global command updates can take a while to appear. `npm run register` checks
+and registers globally (or to `GUILD_ID`, when set) without starting the bot.
+Before writing, the bot compares the current command definitions so routine
+restarts do not keep replacing identical commands. Discord rate-limit cooldowns
+are saved in PostgreSQL and survive service restarts.
 
 ## Deploy on Render
 
