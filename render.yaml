@@ -1,15 +1,12 @@
 services:
   - type: web
-    name: air-commander-sparkxie-bot
+    name: Giveway-bot-1
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: python bot.py
+    healthCheckPath: /health
     envVars:
       - key: DISCORD_TOKEN
         sync: false
       - key: GUILD_ID
         sync: false
-      - key: DATABASE_URL
-        fromDatabase:
-          name: air-commander-db
-          property: connectionString
