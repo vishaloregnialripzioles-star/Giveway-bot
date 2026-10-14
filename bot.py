@@ -91,6 +91,17 @@ async def help_command(interaction: discord.Interaction):
         color=discord.Color.blurple(),
     )
     embed.add_field(
+        name="🎉 Giveaways",
+        value=(
+            "**/giveaway start** — Create a button-entry giveaway\n"
+            "**/giveaway end** — End early and pick winner(s)\n"
+            "**/giveaway reroll** — Pick new winner(s)\n"
+            "**/giveaway cancel** — Cancel without a winner\n"
+            "**/giveaway entrants** — View the entry list"
+        ),
+        inline=False,
+    )
+    embed.add_field(
         name="🧰 General",
         value="**/help** — Show this guide\n**/ping** — Check bot latency",
         inline=False,
