@@ -7,6 +7,7 @@ from datetime import timedelta
 import discord
 from discord import app_commands
 from flask import Flask, jsonify
+from giveaway_system import register_giveaway_commands
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("giveway-bot")
@@ -22,6 +23,7 @@ if GUILD_ID and not GUILD_ID.isdigit():
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
+giveaways = register_giveaway_commands(tree, client)
 web = Flask(__name__)
 synced = False
 
@@ -32,8 +34,9 @@ def home():
         "status": "ok",
         "bot": "Giveway-bot",
         "discord_connected": client.is_ready(),
-        "commands": ["help", "ping", "kick", "ban", "timeout", "untimeout",
-                     "purge", "warn", "slowmode", "lock", "unlock", "nickname"],
+        "commands": ["help", "ping", "giveaway start", "giveaway end", "giveaway reroll",
+                     "giveaway cancel", "giveaway entrants", "kick", "ban", "timeout",
+                     "untimeout", "purge", "warn", "slowmode", "lock", "unlock", "nickname"],
     })
 
 
@@ -84,7 +87,7 @@ def hierarchy_ok(interaction: discord.Interaction, target: discord.Member) -> bo
 async def help_command(interaction: discord.Interaction):
     embed = discord.Embed(
         title="✨ Giveway-bot • Help",
-        description="A simple guide to utility and moderation commands.",
+        description="Giveaways plus useful server moderation tools.",
         color=discord.Color.blurple(),
     )
     embed.add_field(
@@ -320,6 +323,7 @@ async def on_ready():
     if synced:
         return
     try:
+        await giveaways.restore_views()
         if GUILD_ID:
             guild = discord.Object(id=int(GUILD_ID))
             tree.copy_global_to(guild=guild)
