@@ -19,7 +19,8 @@ if not TOKEN:
 if GUILD_ID and not GUILD_ID.isdigit():
     raise RuntimeError("GUILD_ID must be a numeric Discord server ID.")
 
-client = discord.Client(intents=discord.Intents.none())
+intents = discord.Intents.default()
+client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 web = Flask(__name__)
 synced = False
@@ -335,23 +336,11 @@ async def on_ready():
 
 
 async def main():
-    delay = 120
-    while True:
-        try:
-            await client.start(TOKEN, reconnect=True)
-            return
-        except discord.HTTPException as exc:
-            await client.close()
-            if exc.status != 429:
-                log.exception("Discord login failed with HTTP %s.", exc.status)
-                raise
-            log.warning("Discord login rate-limited (HTTP 429); waiting %s seconds before retry.", delay)
-            await asyncio.sleep(delay)
-            delay = min(delay * 2, 900)
-        except Exception:
-            await client.close()
-            log.exception("Discord client stopped unexpectedly.")
-            raise
+    try:
+        await client.start(TOKEN, reconnect=True)
+    except Exception:
+        log.exception("Discord client stopped unexpectedly.")
+        raise
 
 
 if __name__ == "__main__":
