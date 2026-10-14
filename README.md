@@ -1,41 +1,45 @@
 # Giveway-bot
 
-A clean Discord server bot with utility and moderation slash commands, built with discord.py and hosted on Render.
+A Discord bot with a full button-based giveaway system, persistent entry tracking, automatic winner selection, and moderator controls.
 
-## Commands
+## Giveaway commands
 
-### General
-- /help — Private command guide
-- /ping — Check bot gateway latency
+- `/giveaway start` — Start a giveaway with a prize, duration, winner count, channel, and optional rules.
+- `/giveaway end` — End an active giveaway early and select winner(s).
+- `/giveaway reroll` — Select replacement winner(s) from remaining entrants.
+- `/giveaway cancel` — Cancel an active giveaway without selecting winners.
+- `/giveaway entrants` — Privately view the entrant list.
 
-### Moderation
-- /kick member reason
-- /ban member reason
-- /timeout member minutes reason — 1 to 40,320 minutes (28 days)
-- /untimeout member reason
-- /purge amount — Delete 1–100 recent messages
-- /warn member reason — Sends a warning DM
-- /slowmode seconds — 0 disables slowmode
-- /lock channel and /unlock channel
-- /nickname member nickname — Leave nickname empty to reset
+Durations use `30s`, `10m`, `2h`, or `1d` format. Allowed duration is 30 seconds to 30 days. Each user can enter once, can leave before the draw, and bots cannot enter. Giveaway buttons are persistent across bot restarts when the database is preserved.
 
-Moderation commands have Discord default permission restrictions and runtime permission checks. The bot also respects role hierarchy for member actions. Its role must be above the members it moderates.
+## Other commands
+
+- `/help`, `/ping`
+- `/kick`, `/ban`, `/timeout`, `/untimeout`, `/purge`, `/warn`
+- `/slowmode`, `/lock`, `/unlock`, `/nickname`
+
+Moderation commands require the appropriate Discord permissions and role hierarchy.
 
 ## Render setup
 
-- Build command: pip install -r requirements.txt
-- Start command: python bot.py
-- Required environment variable: DISCORD_TOKEN
-- Recommended environment variable: GUILD_ID — numeric ID of the server where commands should appear quickly
+- Build command: `pip install -r requirements.txt`
+- Start command: `python bot.py`
+- Required environment variable: `DISCORD_TOKEN`
+- Recommended environment variable: `GUILD_ID` — numeric ID of the server where commands should appear quickly.
+- Optional environment variable: `GIVEAWAY_DB_PATH` — full path to the SQLite database file.
 
-The service exposes / and /health. These report the web process and separately indicate whether the Discord gateway is connected.
+### Keep giveaway data through deploys
 
-## Discord setup checklist
+Render's normal filesystem may be ephemeral. To preserve giveaway entries and active giveaways across restarts/deploys, attach a persistent disk to the service (for example mounted at `/var/data`) and set:
 
-1. Invite the bot using the bot and applications.commands scopes.
-2. Grant only the permissions needed: Kick Members, Ban Members, Moderate Members, Manage Messages, Read Message History, Manage Channels, and Manage Nicknames.
-3. Move the bot role above members and roles it should moderate.
-4. Set DISCORD_TOKEN and GUILD_ID in Render Environment. Never paste your token into chat or commit it to GitHub.
-5. Check Render logs for the Discord connection and slash-command sync messages after deployment.
+```env
+GIVEAWAY_DB_PATH=/var/data/giveaways.sqlite3
+```
 
-If Discord returns Cloudflare Error 1015 / HTTP 429, the service may stay healthy while Discord interactions fail. Do not repeatedly redeploy or retry commands during that upstream block; wait for it to clear or contact Discord Support with the Ray ID and timestamp.
+The service exposes `/` and `/health`; both report web health separately from Discord gateway connection state.
+
+## Discord permissions
+
+Invite the bot with the `bot` and `applications.commands` scopes. For giveaway channels, allow View Channel, Send Messages, Embed Links, and Read Message History. Moderation features need their own permissions. The bot's role should be positioned appropriately for moderation commands.
+
+Never paste your bot token into chat or commit it to GitHub.
