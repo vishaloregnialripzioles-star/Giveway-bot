@@ -336,11 +336,21 @@ async def on_ready():
 
 
 async def main():
-    try:
-        await client.start(TOKEN, reconnect=True)
-    except Exception:
-        log.exception("Discord client stopped unexpectedly.")
-        raise
+    delay = 120
+    while True:
+        try:
+            await client.start(TOKEN, reconnect=True)
+            return
+        except discord.HTTPException as exc:
+            if exc.status != 429:
+                log.exception("Discord login failed with HTTP %s.", exc.status)
+                raise
+            log.warning("Discord login returned HTTP 429; waiting %s seconds before retry.", delay)
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 900)
+        except Exception:
+            log.exception("Discord client stopped unexpectedly.")
+            raise
 
 
 if __name__ == "__main__":
