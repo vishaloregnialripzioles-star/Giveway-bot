@@ -20,7 +20,8 @@ if not TOKEN:
 if GUILD_ID and not GUILD_ID.isdigit():
     raise RuntimeError("GUILD_ID must be a numeric Discord server ID.")
 
-intents = discord.Intents.default()\nintents.message_content = True
+intents = discord.Intents.default()
+intents.message_content = True
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 giveaways = register_giveaway_commands(tree, client)
