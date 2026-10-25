@@ -1,7 +1,6 @@
 """Persistent Discord giveaway system for Giveway-bot.
 
-Set GIVEAWAY_DB_PATH to a file on a Render persistent disk if giveaways and
-entries must survive service restarts and deployments.
+Giveaway records and entries are stored in Supabase PostgreSQL.
 """
 import asyncio
 import json
@@ -9,44 +8,49 @@ import logging
 import os
 import random
 import re
-import sqlite3
 import time
 from contextlib import contextmanager
+
+import psycopg
+from psycopg.rows import dict_row
 from datetime import datetime, timezone
 
 import discord
 from discord import app_commands
 
 log = logging.getLogger("giveway-bot.giveaways")
-DB_PATH = os.getenv("GIVEAWAY_DB_PATH", "giveaways.sqlite3")
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL is missing. Set your Supabase PostgreSQL connection URI in Render Environment.")
 DURATION_RE = re.compile(r"^(\d{1,5})(s|m|h|d)$", re.IGNORECASE)
 MAX_DURATION_SECONDS = 60 * 60 * 24 * 30
 
 
 def _connect():
-    conn = sqlite3.connect(DB_PATH, timeout=15)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return psycopg.connect(
+        DATABASE_URL,
+        sslmode="require",
+        connect_timeout=10,
+        row_factory=dict_row,
+    )
 
 
 def _init_db():
-    folder = os.path.dirname(os.path.abspath(DB_PATH))
-    os.makedirs(folder, exist_ok=True)
     with _connect() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS giveaways (
-                message_id INTEGER PRIMARY KEY,
-                guild_id INTEGER NOT NULL,
-                channel_id INTEGER NOT NULL,
-                host_id INTEGER NOT NULL,
+                message_id BIGINT PRIMARY KEY,
+                guild_id BIGINT NOT NULL,
+                channel_id BIGINT NOT NULL,
+                host_id BIGINT NOT NULL,
                 prize TEXT NOT NULL,
                 description TEXT NOT NULL DEFAULT '',
                 winner_count INTEGER NOT NULL,
-                ends_at REAL NOT NULL,
+                ends_at DOUBLE PRECISION NOT NULL,
                 status TEXT NOT NULL DEFAULT 'active',
                 entrants_json TEXT NOT NULL DEFAULT '[]',
                 winners_json TEXT NOT NULL DEFAULT '[]',
-                created_at REAL NOT NULL
+                created_at DOUBLE PRECISION NOT NULL
             )
         """)
 
@@ -66,7 +70,7 @@ def _db():
 
 def _get(message_id: int):
     with _db() as conn:
-        row = conn.execute("SELECT * FROM giveaways WHERE message_id = ?", (message_id,)).fetchone()
+        row = conn.execute("SELECT * FROM giveaways WHERE message_id = %s", (message_id,)).fetchone()
         return dict(row) if row else None
 
 
@@ -76,10 +80,10 @@ def _update(message_id: int, **fields):
     allowed = {"status", "entrants_json", "winners_json", "ends_at"}
     if not set(fields).issubset(allowed):
         raise ValueError("Unsupported giveaway field")
-    assignments = ", ".join(f"{key} = ?" for key in fields)
+    assignments = ", ".join(f"{key} = %s" for key in fields)
     with _db() as conn:
         conn.execute(
-            f"UPDATE giveaways SET {assignments} WHERE message_id = ?",
+            f"UPDATE giveaways SET {assignments} WHERE message_id = %s",
             (*fields.values(), message_id),
         )
 
@@ -354,7 +358,7 @@ class GiveawayManager:
                         """INSERT INTO giveaways
                         (message_id, guild_id, channel_id, host_id, prize, description,
                          winner_count, ends_at, status, entrants_json, winners_json, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                         (post.id, draft["guild_id"], draft["channel_id"], draft["host_id"],
                          draft["prize"], draft["description"], draft["winner_count"], draft["ends_at"],
                          draft["status"], draft["entrants_json"], draft["winners_json"], draft["created_at"]),
