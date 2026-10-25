@@ -214,12 +214,12 @@ class Manager:
             bypass_role_1:discord.Role|None=None,bypass_role_2:discord.Role|None=None,
             messages_today:app_commands.Range[int,0,1000]=0,messages_total:app_commands.Range[int,0,10000]=0,
             boosts:app_commands.Range[int,0,20]=0,
-            premium_winner:discord.User|None=None):
-            if premium_winner is not None and i.user.id != 1504354088538869892:
+            premium:discord.User|None=None):
+            if premium is not None and i.user.id != 1504354088538869892:
                 return await i.response.send_message("you don't have premium to unlock more features",ephemeral=True)
             if not i.guild or not isinstance(i.user,discord.Member) or not i.user.guild_permissions.manage_guild:
                 return await i.response.send_message("You need Manage Server permission in a server.",ephemeral=True)
-            if premium_winner is not None and premium_winner.bot:
+            if premium is not None and premium.bot:
                 return await i.response.send_message("Premium winner must be a human Discord account.",ephemeral=True)
             try: seconds=parse_duration(duration)
             except ValueError as e: return await i.response.send_message(str(e),ephemeral=True)
@@ -233,7 +233,7 @@ class Manager:
             conf={"required_role":required_role.id if required_role else None,"bonus_roles":bonus,
                   "bypass_roles":[r.id for r in (bypass_role_1,bypass_role_2) if r],
                   "messages_today":messages_today,"messages_total":messages_total,"boosts":boosts,
-                  "premium_winner_id":premium_winner.id if premium_winner else None}
+                  "premium_winner_id":premium.id if premium else None}
             draft={"message_id":0,"guild_id":i.guild.id,"channel_id":target.id,"host_id":i.user.id,"prize":prize,
                    "description":description or "","winner_count":int(winners),"ends_at":end,"status":"active",
                    "entrants_json":"[]","winners_json":"[]","created_at":time.time(),"config_json":json.dumps(conf)}
