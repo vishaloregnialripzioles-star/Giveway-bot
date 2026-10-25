@@ -76,8 +76,6 @@ def embed_for(row):
     e.add_field(name="Must have boosted the server",value=f"{conf.get('boosts',0)} time(s)",inline=False)
     bypass=[f"<@&{r}>" for r in conf.get("bypass_roles",[])]
     e.add_field(name="Requirements Bypass Roles:",value=", ".join(bypass) or "None",inline=False)
-    if conf.get("premium_winner_id"):
-        e.add_field(name="🎟️ Premium Winner Setting",value="This giveaway uses a **predetermined-winner rule** if the selected user enters and meets eligibility requirements. Otherwise, winners are chosen randomly.",inline=False)
     e.add_field(name="Ends at",value=f"<t:{int(row['ends_at'])}:f>",inline=False)
     if not active:
         winners=ids(row,"winners_json")
@@ -239,6 +237,8 @@ class Manager:
                    "entrants_json":"[]","winners_json":"[]","created_at":time.time(),"config_json":json.dumps(conf)}
             try:
                 post=await target.send(embed=embed_for(draft),view=GiveawayView())
+                if premium is not None:
+                    await target.send(f"📋 **Giveaway rules notice:** The selected Premium user (<@{premium.id}>) will be the winner if they enter and meet the eligibility requirements. Otherwise, winner selection is random.")
                 draft["message_id"]=post.id
                 with db() as c:
                     c.execute("""INSERT INTO giveaways(message_id,guild_id,channel_id,host_id,prize,description,winner_count,
