@@ -141,7 +141,6 @@ class GiveawayView(discord.ui.View):
 class Manager:
     def __init__(self,client):
         self.client=client; self.tasks={}; self.lock=asyncio.Lock(); self.restored=False
-        client.add_listener(self.on_message,"on_message")
     async def on_message(self,message):
         if not message.guild or message.author.bot: return
         day=datetime.now(timezone.utc).date().isoformat()
