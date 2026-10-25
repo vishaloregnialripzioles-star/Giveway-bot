@@ -203,8 +203,8 @@ class Manager:
         async def start(i:discord.Interaction,prize:app_commands.Range[str,1,180],duration:app_commands.Range[str,2,8],
             winners:app_commands.Range[int,1,20]=1,channel:discord.TextChannel|None=None,
             description:app_commands.Range[str,1,400]|None=None,
-            required_role:discord.Role|None=None,bonus_role_1:discord.Role|None=None,bonus_entries_1:app_commands.Range[int,1,20]=0,
-            bonus_role_2:discord.Role|None=None,bonus_entries_2:app_commands.Range[int,1,20]=0,
+            required_role:discord.Role|None=None,bonus_role_1:discord.Role|None=None,bonus_entries_1:app_commands.Range[int,0,20]=0,
+            bonus_role_2:discord.Role|None=None,bonus_entries_2:app_commands.Range[int,0,20]=0,
             bypass_role_1:discord.Role|None=None,bypass_role_2:discord.Role|None=None,
             messages_today:app_commands.Range[int,0,1000]=0,messages_total:app_commands.Range[int,0,10000]=0,
             boosts:app_commands.Range[int,0,20]=0):
@@ -272,7 +272,6 @@ class Manager:
             if len(users)>80: body+=f" and {len(users)-80} more"
             await i.response.send_message(f"Participants ({len(users)}): {body}",ephemeral=True)
         tree.add_command(group)
-    return self
 
 def register_giveaway_commands(tree,client):
     manager=Manager(client); manager.register(tree); return manager
