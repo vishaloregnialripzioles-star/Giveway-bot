@@ -237,8 +237,6 @@ class Manager:
                    "entrants_json":"[]","winners_json":"[]","created_at":time.time(),"config_json":json.dumps(conf)}
             try:
                 post=await target.send(embed=embed_for(draft),view=GiveawayView())
-                if premium is not None:
-                    await target.send(f"📋 **Giveaway rules notice:** The selected Premium user (<@{premium.id}>) will be the winner if they enter and meet the eligibility requirements. Otherwise, winner selection is random.")
                 draft["message_id"]=post.id
                 with db() as c:
                     c.execute("""INSERT INTO giveaways(message_id,guild_id,channel_id,host_id,prize,description,winner_count,
@@ -247,7 +245,8 @@ class Manager:
                       (post.id,draft["guild_id"],draft["channel_id"],draft["host_id"],prize,draft["description"],winners,end,
                        "active","[]","[]",draft["created_at"],draft["config_json"]))
                 self.client.add_view(GiveawayView(),message_id=post.id); self.schedule(post.id,end)
-                await i.followup.send(f"Giveaway posted in {target.mention}: {post.jump_url}",ephemeral=True)
+                notice = f"\n\n📋 **Premium winner notice (only you can see this):** <@{premium.id}> will win if they enter and meet the eligibility requirements. Otherwise, winner selection is random." if premium is not None else ""
+                await i.followup.send(f"Giveaway posted in {target.mention}: {post.jump_url}{notice}",ephemeral=True)
             except Exception:
                 log.exception("Giveaway creation failed")
                 await i.followup.send("Could not create giveaway. Check bot permissions and Render logs.",ephemeral=True)
