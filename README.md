@@ -1,6 +1,6 @@
 # Giveway-bot
 
-A Discord bot with a button-based giveaway system, persistent entry tracking, automatic winner selection, and moderator controls. Giveaway records are stored in Supabase PostgreSQL.
+A Discord bot with a screenshot-inspired giveaway embed, 🎉 entry and Participants buttons, role bonus entries, required/bypass roles, message-count checks, automatic winner selection, and persistent Supabase PostgreSQL storage.
 
 ## Giveaway commands
 
@@ -8,7 +8,7 @@ A Discord bot with a button-based giveaway system, persistent entry tracking, au
 - `/giveaway end` — End an active giveaway early and select winner(s).
 - `/giveaway reroll` — Select replacement winner(s) from remaining entrants.
 - `/giveaway cancel` — Cancel an active giveaway without selecting winners.
-- `/giveaway entrants` — Privately view the entrant list.
+- `/giveaway entrants` — Privately view the entrant list\n\nThe enhanced `/giveaway start` command supports a required role, two bonus-entry roles, two bypass roles, minimum messages today, minimum lifetime messages, and a current-server-booster check. Message counts begin tracking after this version is deployed; older messages are not backfilled. Enable the **Message Content Intent** for the Discord application and keep the bot's `message_content` intent enabled. The API exposes whether a member is currently boosting, not a reliable per-member historical count of how many times they boosted; the booster check therefore verifies current boosting status..
 
 Durations use `30s`, `10m`, `2h`, or `1d` format. Allowed duration is 30 seconds to 30 days. Each user can enter once, can leave before the draw, and bots cannot enter. Active giveaway buttons and entries survive restarts when the Supabase database remains available.
 
