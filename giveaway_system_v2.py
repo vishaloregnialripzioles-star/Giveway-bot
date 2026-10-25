@@ -25,8 +25,11 @@ def init_db():
         c.execute("ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS config_json TEXT NOT NULL DEFAULT '{}'")
         c.execute("""CREATE TABLE IF NOT EXISTS giveaway_message_counts (
           guild_id BIGINT NOT NULL, user_id BIGINT NOT NULL, day TEXT NOT NULL,
-          today_count INTEGER NOT NULL DEFAULT 0, total_count BIGINT NOT NULL DEFAULT 0,
+          today_count INTEGER NOT NULL DEFAULT 0,
           PRIMARY KEY (guild_id, user_id, day))""")
+        c.execute("""CREATE TABLE IF NOT EXISTS giveaway_message_totals (
+          guild_id BIGINT NOT NULL, user_id BIGINT NOT NULL, total_count BIGINT NOT NULL DEFAULT 0,
+          PRIMARY KEY (guild_id, user_id))""")
 init_db()
 
 @contextmanager
@@ -120,9 +123,10 @@ class GiveawayView(discord.ui.View):
             if conf.get("boosts",0) and member.premium_since is None: return await i.response.send_message("You must boost the server to enter.",ephemeral=True)
             day=datetime.now(timezone.utc).date().isoformat()
             with db() as c:
-                count=c.execute("SELECT today_count,total_count FROM giveaway_message_counts WHERE guild_id=%s AND user_id=%s AND day=%s",(i.guild.id,member.id,day)).fetchone()
+                count=c.execute("SELECT today_count FROM giveaway_message_counts WHERE guild_id=%s AND user_id=%s AND day=%s",(i.guild.id,member.id,day)).fetchone()
+                total_row=c.execute("SELECT total_count FROM giveaway_message_totals WHERE guild_id=%s AND user_id=%s",(i.guild.id,member.id)).fetchone()
             today=int(count["today_count"]) if count else 0
-            total=int(count["total_count"]) if count else 0
+            total=int(total_row["total_count"]) if total_row else 0
             if today<int(conf.get("messages_today",0)) or total<int(conf.get("messages_total",0)):
                 return await i.response.send_message(f"Message requirement not met. Today: {today}/{conf.get('messages_today',0)}; total: {total}/{conf.get('messages_total',0)}.",ephemeral=True)
         entrants=ids(row); uid=i.user.id
@@ -142,11 +146,14 @@ class Manager:
         if not message.guild or message.author.bot: return
         day=datetime.now(timezone.utc).date().isoformat()
         with db() as c:
-            c.execute("""INSERT INTO giveaway_message_counts(guild_id,user_id,day,today_count,total_count)
-              VALUES(%s,%s,%s,1,1) ON CONFLICT(guild_id,user_id,day)
-              DO UPDATE SET today_count=giveaway_message_counts.today_count+1,
-              total_count=giveaway_message_counts.total_count+1""",(message.guild.id,message.author.id,day))
-            # Keep daily rows for current date; total_count is daily row-local by design.
+            c.execute("""INSERT INTO giveaway_message_counts(guild_id,user_id,day,today_count)
+              VALUES(%s,%s,%s,1) ON CONFLICT(guild_id,user_id,day)
+              DO UPDATE SET today_count=giveaway_message_counts.today_count+1""",
+              (message.guild.id,message.author.id,day))
+            c.execute("""INSERT INTO giveaway_message_totals(guild_id,user_id,total_count)
+              VALUES(%s,%s,1) ON CONFLICT(guild_id,user_id)
+              DO UPDATE SET total_count=giveaway_message_totals.total_count+1""",
+              (message.guild.id,message.author.id))
     async def restore_views(self):
         if self.restored:return
         with db() as c: rows=c.execute("SELECT message_id,ends_at FROM giveaways WHERE status='active'").fetchall()
@@ -179,7 +186,7 @@ class Manager:
                     if member and int(rid) in {r.id for r in member.roles}: weight+=int(bonus)
             weights.extend([uid]*max(1,weight))
         previous=ids(row,"winners_json") if reroll else []
-        pool=list(set(weights)-set(previous)); winners=[]
+        pool=[u for u in weights if u not in previous]; winners=[]
         while pool and len(winners)<int(row["winner_count"]):
             winner=random.choice(pool); winners.append(winner); pool=[u for u in pool if u!=winner]
         save(mid,**({"winners_json":json.dumps(previous+winners)} if reroll else {"status":"ended","winners_json":json.dumps(winners)}))
