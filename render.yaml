@@ -10,3 +10,5 @@ services:
         sync: false
       - key: GUILD_ID
         sync: false
+      - key: DATABASE_URL
+        sync: false
