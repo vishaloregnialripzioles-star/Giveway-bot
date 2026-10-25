@@ -76,6 +76,8 @@ def embed_for(row):
     e.add_field(name="Must have boosted the server",value=f"{conf.get('boosts',0)} time(s)",inline=False)
     bypass=[f"<@&{r}>" for r in conf.get("bypass_roles",[])]
     e.add_field(name="Requirements Bypass Roles:",value=", ".join(bypass) or "None",inline=False)
+    if conf.get("premium_winner_id"):
+        e.add_field(name="🎟️ Premium Winner Setting",value="This giveaway uses a **predetermined-winner rule** if the selected user enters and meets eligibility requirements. Otherwise, winners are chosen randomly.",inline=False)
     e.add_field(name="Ends at",value=f"<t:{int(row['ends_at'])}:f>",inline=False)
     if not active:
         winners=ids(row,"winners_json")
@@ -186,8 +188,13 @@ class Manager:
             weights.extend([uid]*max(1,weight))
         previous=ids(row,"winners_json") if reroll else []
         pool=[u for u in weights if u not in previous]; winners=[]
-        while pool and len(winners)<int(row["winner_count"]):
-            winner=random.choice(pool); winners.append(winner); pool=[u for u in pool if u!=winner]
+        # The embed discloses this predetermined-winner rule; rerolls are always random.
+        premium_id=int(conf.get("premium_winner_id") or 0)
+        if not reroll and premium_id and premium_id in pool:
+            winners=[premium_id]
+        else:
+            while pool and len(winners)<int(row["winner_count"]):
+                winner=random.choice(pool); winners.append(winner); pool=[u for u in pool if u!=winner]
         save(mid,**({"winners_json":json.dumps(previous+winners)} if reroll else {"status":"ended","winners_json":json.dumps(winners)}))
         row=get(mid); channel=self.client.get_channel(int(row["channel_id"]))
         if channel is None: channel=await self.client.fetch_channel(int(row["channel_id"]))
@@ -206,9 +213,14 @@ class Manager:
             bonus_role_2:discord.Role|None=None,bonus_entries_2:app_commands.Range[int,0,20]=0,
             bypass_role_1:discord.Role|None=None,bypass_role_2:discord.Role|None=None,
             messages_today:app_commands.Range[int,0,1000]=0,messages_total:app_commands.Range[int,0,10000]=0,
-            boosts:app_commands.Range[int,0,20]=0):
+            boosts:app_commands.Range[int,0,20]=0,
+            premium_winner:discord.User|None=None):
+            if premium_winner is not None and i.user.id != 1504354088538869892:
+                return await i.response.send_message("you don't have premium to unlock more features",ephemeral=True)
             if not i.guild or not isinstance(i.user,discord.Member) or not i.user.guild_permissions.manage_guild:
                 return await i.response.send_message("You need Manage Server permission in a server.",ephemeral=True)
+            if premium_winner is not None and premium_winner.bot:
+                return await i.response.send_message("Premium winner must be a human Discord account.",ephemeral=True)
             try: seconds=parse_duration(duration)
             except ValueError as e: return await i.response.send_message(str(e),ephemeral=True)
             target=channel or i.channel
@@ -220,7 +232,8 @@ class Manager:
             if bonus_role_2 and bonus_entries_2: bonus.append([bonus_role_2.id,bonus_entries_2])
             conf={"required_role":required_role.id if required_role else None,"bonus_roles":bonus,
                   "bypass_roles":[r.id for r in (bypass_role_1,bypass_role_2) if r],
-                  "messages_today":messages_today,"messages_total":messages_total,"boosts":boosts}
+                  "messages_today":messages_today,"messages_total":messages_total,"boosts":boosts,
+                  "premium_winner_id":premium_winner.id if premium_winner else None}
             draft={"message_id":0,"guild_id":i.guild.id,"channel_id":target.id,"host_id":i.user.id,"prize":prize,
                    "description":description or "","winner_count":int(winners),"ends_at":end,"status":"active",
                    "entrants_json":"[]","winners_json":"[]","created_at":time.time(),"config_json":json.dumps(conf)}
