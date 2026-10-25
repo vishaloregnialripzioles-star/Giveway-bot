@@ -7,7 +7,7 @@ from datetime import timedelta
 import discord
 from discord import app_commands
 from flask import Flask, jsonify
-from giveaway_system import register_giveaway_commands
+from giveaway_system_v2 import register_giveaway_commands
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("giveway-bot")
@@ -20,7 +20,7 @@ if not TOKEN:
 if GUILD_ID and not GUILD_ID.isdigit():
     raise RuntimeError("GUILD_ID must be a numeric Discord server ID.")
 
-intents = discord.Intents.default()
+intents = discord.Intents.default()\nintents.message_content = True
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 giveaways = register_giveaway_commands(tree, client)
