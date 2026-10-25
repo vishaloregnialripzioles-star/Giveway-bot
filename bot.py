@@ -329,6 +329,12 @@ async def nickname(interaction: discord.Interaction, member: discord.Member, nic
 
 
 @client.event
+async def on_message(message: discord.Message):
+    # The giveaway manager tracks message counts for eligibility requirements.
+    await giveaways.on_message(message)
+
+
+@client.event
 async def on_ready():
     global synced
     log.info("Discord connected as %s (ID: %s)", client.user, client.user.id)
