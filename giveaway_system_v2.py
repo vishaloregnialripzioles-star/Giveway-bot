@@ -279,15 +279,6 @@ class GiveawayView(discord.ui.View):
     async def leave(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.change(interaction, False)
 
-    @discord.ui.button(label="Participants", emoji="👥", style=discord.ButtonStyle.secondary, custom_id="giveaway_v2:participants", row=1)
-    async def participants(self, interaction: discord.Interaction, button: discord.ui.Button):
-        row = get(interaction.message.id) if interaction.message else None
-        if not row or not interaction.guild:
-            return await interaction.response.send_message("Giveaway not found.", ephemeral=True)
-        can_remove = isinstance(interaction.user, discord.Member) and interaction.user.guild_permissions.manage_guild
-        view = ParticipantView(row, interaction.user.id, can_remove=can_remove)
-        await interaction.response.send_message(embed=view.make_embed(row, interaction.guild), view=view, ephemeral=True)
-
     async def change(self, interaction: discord.Interaction, enter: bool, message_id=None):
         if not interaction.guild or (not interaction.message and message_id is None):
             return await interaction.response.send_message("Use this in a server giveaway.", ephemeral=True)
