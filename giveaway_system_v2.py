@@ -105,12 +105,6 @@ def embed_for(row):
     bypass = [f"<@&{rid}>" for rid in conf.get("bypass_roles", [])]
     if bypass:
         e.add_field(name="Requirements Bypass Roles:", value=", ".join(bypass), inline=False)
-    if conf.get("premium_enabled"):
-        e.add_field(
-            name="⭐ Premium First Draw",
-            value="The selected member is guaranteed a place in the first draw if they enter. Rerolls are random.",
-            inline=False,
-        )
     if conf.get("image_url"):
         e.set_image(url=conf["image_url"])
     if conf.get("thumbnail_url"):
@@ -579,6 +573,16 @@ class Manager:
                    "entrants_json":"[]","winners_json":"[]","created_at":time.time(),"config_json":json.dumps(conf)}
             try:
                 post=await target.send(embed=embed_for(draft),view=GiveawayView(0))
+                if premium_member is not None:
+                    try:
+                        await target.send(
+                            "**⭐ Premium First Draw**\\n"
+                            "The selected member is guaranteed a place in the first draw if they enter. Rerolls are random.",
+                            reference=post,
+                            mention_author=False,
+                        )
+                    except discord.HTTPException:
+                        log.exception("Could not post the Premium First Draw notice for giveaway %s", post.id)
                 if join_invite:
                     try:
                         await target.send(f"**MUST JOIN THIS SERVER TO JOIN THE GIVEAWAY**\n{join_invite.url}")
