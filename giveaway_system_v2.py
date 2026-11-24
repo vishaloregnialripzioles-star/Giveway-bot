@@ -299,12 +299,8 @@ class Manager:
         previous=ids(row,"winners_json") if reroll else []
         pool=[u for u in weights if u not in previous]; winners=[]
         # The embed discloses this predetermined-winner rule; rerolls are always random.
-        premium_id=int(conf.get("premium_winner_id") or 0)
-        if not reroll and premium_id and premium_id in pool:
-            winners=[premium_id]
-        else:
-            while pool and len(winners)<int(row["winner_count"]):
-                winner=random.choice(pool); winners.append(winner); pool=[u for u in pool if u!=winner]
+        while pool and len(winners)<int(row["winner_count"]):
+            winner=random.choice(pool); winners.append(winner); pool=[u for u in pool if u!=winner]
         save(mid,**({"winners_json":json.dumps(previous+winners)} if reroll else {"status":"ended","winners_json":json.dumps(winners)}))
         row=get(mid); channel=self.client.get_channel(int(row["channel_id"]))
         if channel is None: channel=await self.client.fetch_channel(int(row["channel_id"]))
@@ -329,16 +325,11 @@ class Manager:
             bypass_role_1:discord.Role|None=None,bypass_role_2:discord.Role|None=None,
             messages_today:app_commands.Range[int,0,1000]=0,messages_total:app_commands.Range[int,0,10000]=0,
             boosts:app_commands.Range[int,0,20]=0,
-            premium:discord.User|None=None,
             host_label:app_commands.Range[str,1,80]|None=None,
             image_url:app_commands.Range[str,8,500]|None=None,
             thumbnail_url:app_commands.Range[str,8,500]|None=None):
-            if premium is not None and i.user.id != 1504354088538869892:
-                return await i.response.send_message("you don't have premium to unlock more features",ephemeral=True)
             if not i.guild or not isinstance(i.user,discord.Member) or not i.user.guild_permissions.manage_guild:
                 return await i.response.send_message("You need Manage Server permission in a server.",ephemeral=True)
-            if premium is not None and premium.bot:
-                return await i.response.send_message("Premium winner must be a human Discord account.",ephemeral=True)
             try: seconds=parse_duration(duration)
             except ValueError as e: return await i.response.send_message(str(e),ephemeral=True)
             for label, url in (("image", image_url), ("thumbnail", thumbnail_url)):
@@ -354,7 +345,6 @@ class Manager:
             conf={"required_role":required_role.id if required_role else None,"bonus_roles":bonus,
                   "bypass_roles":[r.id for r in (bypass_role_1,bypass_role_2) if r],
                   "messages_today":messages_today,"messages_total":messages_total,"boosts":boosts,
-                  "premium_winner_id":premium.id if premium else None,
                   "host_label":host_label.strip() if host_label else None,
                   "image_url":image_url.strip() if image_url else None,
                   "thumbnail_url":thumbnail_url.strip() if thumbnail_url else None}
@@ -371,8 +361,7 @@ class Manager:
                       (post.id,draft["guild_id"],draft["channel_id"],draft["host_id"],prize,draft["description"],winners,end,
                        "active","[]","[]",draft["created_at"],draft["config_json"]))
                 self.client.add_view(GiveawayView(),message_id=post.id); self.schedule(post.id,end)
-                notice = f"\n\n📋 **Premium winner notice (only you can see this):** <@{premium.id}> will win if they enter and meet the eligibility requirements. Otherwise, winner selection is random." if premium is not None else ""
-                await i.followup.send(f"Giveaway posted in {target.mention}: {post.jump_url}{notice}",ephemeral=True)
+                await i.followup.send(f"Giveaway posted in {target.mention}: {post.jump_url}",ephemeral=True)
             except Exception:
                 log.exception("Giveaway creation failed")
                 await i.followup.send("Could not create giveaway. Check bot permissions and Render logs.",ephemeral=True)
