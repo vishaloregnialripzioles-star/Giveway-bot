@@ -359,10 +359,14 @@ class Manager:
             for label, url in (("image", image_url), ("thumbnail", thumbnail_url)):
                 if url and (not url.startswith("https://") or len(url) > 500):
                     return await i.response.send_message(f"The {label} URL must be an HTTPS image URL.", ephemeral=True)
+            target=channel or i.channel
+            if not isinstance(target,discord.TextChannel):
+                return await i.response.send_message("Choose a text channel.", ephemeral=True)
+            await i.response.defer(ephemeral=True, thinking=True)
             join_invite = None
             if join_server:
                 match = re.fullmatch(
-                    r"(?:https?://)?(?:www\\.)?(?:discord\\.gg/|discord(?:app)?\\.com/invite/)([A-Za-z0-9-]+)(?:\\?.*)?",
+                    r"(?:https?://)?(?:www[.])?(?:discord[.]gg/|discord(?:app)?[.]com/invite/)([A-Za-z0-9-]+)(?:[?].*)?",
                     join_server.strip(),
                     re.IGNORECASE,
                 )
@@ -376,9 +380,6 @@ class Manager:
                     return await i.followup.send("That invite doesn't point to a server I can verify.", ephemeral=True)
                 if self.client.get_guild(join_invite.guild.id) is None:
                     return await i.followup.send("The bot must already be a member of the required server before this requirement can be used.", ephemeral=True)
-            target=channel or i.channel
-            if not isinstance(target,discord.TextChannel): return await i.response.send_message("Choose a text channel.",ephemeral=True)
-            await i.response.defer(ephemeral=True,thinking=True)
             end=time.time()+seconds
             bonus=[]
             if bonus_role_1 and bonus_entries_1: bonus.append([bonus_role_1.id,bonus_entries_1])
