@@ -224,6 +224,17 @@ class ParticipantView(discord.ui.View):
         if not isinstance(interaction.user, discord.Member) or not interaction.user.guild_permissions.manage_guild:
             return await interaction.response.send_message("You need Manage Server permission to remove a participant.", ephemeral=True)
         await interaction.response.send_modal(RemoveParticipantModal(self.message_id))
+class LeaveEntryView(discord.ui.View):
+    def __init__(self, message_id):
+        super().__init__(timeout=180)
+        self.message_id = int(message_id)
+
+    @discord.ui.button(label="Leave Giveaway", emoji="🚪", style=discord.ButtonStyle.danger)
+    async def leave(self, interaction: discord.Interaction, button: discord.ui.Button):
+        view = GiveawayView()
+        await view.change(interaction, False)
+
+
 class GiveawayView(discord.ui.View):
     def __init__(self, participant_count=0):
         super().__init__(timeout=None)
@@ -263,22 +274,28 @@ class GiveawayView(discord.ui.View):
                 return await i.response.send_message("I can't verify membership in the required server. The bot needs access to that server's member list.", ephemeral=True)
             except discord.HTTPException:
                 return await i.response.send_message("Membership verification is temporarily unavailable. Please try again.", ephemeral=True)
-        role_ids={r.id for r in member.roles}; bypass=bool(role_ids & set(conf.get("bypass_roles",[])))
-        if not bypass:
-            required=conf.get("required_role")
-            if required and required not in role_ids: return await i.response.send_message(f"You need <@&{required}> to enter.",ephemeral=True)
-            if conf.get("boosts",0) and member.premium_since is None: return await i.response.send_message("You must boost the server to enter.",ephemeral=True)
-            day=datetime.now(timezone.utc).date().isoformat()
-            with db() as c:
-                count=c.execute("SELECT today_count FROM giveaway_message_counts WHERE guild_id=%s AND user_id=%s AND day=%s",(i.guild.id,member.id,day)).fetchone()
-                total_row=c.execute("SELECT total_count FROM giveaway_message_totals WHERE guild_id=%s AND user_id=%s",(i.guild.id,member.id)).fetchone()
-            today=int(count["today_count"]) if count else 0
-            total=int(total_row["total_count"]) if total_row else 0
-            if today<int(conf.get("messages_today",0)) or total<int(conf.get("messages_total",0)):
-                return await i.response.send_message(f"Message requirement not met. Today: {today}/{conf.get('messages_today',0)}; total: {total}/{conf.get('messages_total',0)}.",ephemeral=True)
         entrants=ids(row); uid=i.user.id
-        if enter and uid in entrants: return await i.response.send_message("You're already entered! 🍀",ephemeral=True)
+        if enter and uid in entrants:
+            return await i.response.send_message(
+                "**You already joined the giveaway!**\\nClick on the button below to leave.",
+                view=LeaveEntryView(row["message_id"]),
+                ephemeral=True,
+            )
         if not enter and uid not in entrants: return await i.response.send_message("You're not entered.",ephemeral=True)
+        if enter:
+            role_ids={r.id for r in member.roles}; bypass=bool(role_ids & set(conf.get("bypass_roles",[])))
+            if not bypass:
+                required=conf.get("required_role")
+                if required and required not in role_ids: return await i.response.send_message(f"You need <@&{required}> to enter.",ephemeral=True)
+                if conf.get("boosts",0) and member.premium_since is None: return await i.response.send_message("You must boost the server to enter.",ephemeral=True)
+                day=datetime.now(timezone.utc).date().isoformat()
+                with db() as c:
+                    count=c.execute("SELECT today_count FROM giveaway_message_counts WHERE guild_id=%s AND user_id=%s AND day=%s",(i.guild.id,member.id,day)).fetchone()
+                    total_row=c.execute("SELECT total_count FROM giveaway_message_totals WHERE guild_id=%s AND user_id=%s",(i.guild.id,member.id)).fetchone()
+                today=int(count["today_count"]) if count else 0
+                total=int(total_row["total_count"]) if total_row else 0
+                if today<int(conf.get("messages_today",0)) or total<int(conf.get("messages_total",0)):
+                    return await i.response.send_message(f"Message requirement not met. Today: {today}/{conf.get('messages_today',0)}; total: {total}/{conf.get('messages_total',0)}.",ephemeral=True)
         if enter: entrants.append(uid)
         else: entrants.remove(uid)
         save(row["message_id"],entrants_json=json.dumps(entrants))
