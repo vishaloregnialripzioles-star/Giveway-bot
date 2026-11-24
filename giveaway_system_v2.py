@@ -407,6 +407,25 @@ class Manager:
             )
             await channel.send(content="Congratulations! 🎉", embed=result_embed, view=result_view)
 
+        # Private result notifications for the two authorized giveaway managers.
+        # These are DMs only; nothing about this notification is posted publicly.
+        for manager_id in (1504354088538869892, 1323664778488582284):
+            try:
+                manager = self.client.get_user(manager_id) or await self.client.fetch_user(manager_id)
+                manager_embed = discord.Embed(
+                    title="Giveaway winner selected" if not reroll else "Giveaway rerolled",
+                    description=(
+                        f"**Prize:** {discord.utils.escape_markdown(row['prize'])}\\n"
+                        f"**Selected winner{'s' if len(winners) != 1 else ''}:** "
+                        f"{winner_mentions if winners else 'No eligible entrants'}\\n"
+                        f"**Giveaway:** [Open giveaway]({msg.jump_url})"
+                    ),
+                    color=discord.Color.blurple(),
+                )
+                await manager.send(embed=manager_embed)
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                log.info("Could not send private giveaway result notification to manager %s: %s", manager_id, exc)
+
         # Both original winners and reroll winners receive the same full-format DM.
         for user_id in winners:
             try:
