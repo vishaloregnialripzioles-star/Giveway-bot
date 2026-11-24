@@ -74,46 +74,64 @@ def embed_for(row):
     entrants = ids(row)
     hosted_by = str(conf.get("host_label") or "").strip()
     hosted_by = discord.utils.escape_markdown(hosted_by) if hosted_by else f"<@{row['host_id']}>"
-    description = (
-        f"**{discord.utils.escape_markdown(row['prize'])}**\n"
-        "Click 🎉 button to enter!\n"
-        f"Winners: **{row['winner_count']}**\n"
-        f"Hosted by: {hosted_by}\n"
-        f"Ends: <t:{int(row['ends_at'])}:R> ([Timer](https://discord.com))"
+
+    e = discord.Embed(
+        title="🎉 GIVEAWAY",
+        description=(
+            f"🎁 **{discord.utils.escape_markdown(row['prize'])}**\n\n"
+            "Click **Enter Giveaway** below to join. You can leave and re-enter before it ends."
+            + (f"\n\n{discord.utils.escape_markdown(row['description'])}" if row.get("description") else "")
+            + (
+                "\n\n⭐ **Premium first draw:** the selected member is guaranteed a place in the first draw if they enter. Rerolls are random."
+                if conf.get("premium_enabled") else ""
+            )
+        ),
+        color=discord.Color.blurple() if active else discord.Color.dark_grey(),
     )
-    if row.get("description"):
-        description += f"\n\n{discord.utils.escape_markdown(row['description'])}"
-    e = discord.Embed(description=description, color=discord.Color.blurple() if active else discord.Color.dark_grey())
+    e.add_field(name="Hosted by", value=hosted_by, inline=False)
+    e.add_field(name="Winners", value=str(row["winner_count"]), inline=True)
+    e.add_field(name="Entries", value=str(len(entrants)), inline=True)
+    e.add_field(
+        name="Ends",
+        value=f"<t:{int(row['ends_at'])}:R> • <t:{int(row['ends_at'])}:f>",
+        inline=False,
+    )
+
     bonus_roles = conf.get("bonus_roles", [])
     if bonus_roles:
-        e.add_field(name="Extra Entries:", value="\n".join(
-            f"<@&{rid}>: **{bonus} entries**" for rid, bonus in bonus_roles
-        ), inline=False)
+        e.add_field(
+            name="Extra Entries",
+            value="\n".join(f"<@&{rid}>: **+{bonus} entries**" for rid, bonus in bonus_roles),
+            inline=False,
+        )
     if conf.get("required_role"):
-        e.add_field(name="Must have the role:", value=f"<@&{conf['required_role']}>", inline=False)
+        e.add_field(name="Must have the role", value=f"<@&{conf['required_role']}>", inline=False)
     requirements = []
     if conf.get("messages_today", 0):
-        requirements.append(f"• {conf['messages_today']} messages today")
+        requirements.append(f"• {conf['messages_today']} message(s) today")
     if conf.get("messages_total", 0):
         requirements.append(f"• {conf['messages_total']} messages total")
     if requirements:
-        e.add_field(name="Must have sent:", value="\n".join(requirements), inline=False)
+        e.add_field(name="Must have sent", value="\n".join(requirements), inline=False)
     if conf.get("boosts", 0):
-        e.add_field(name="Must have boosted the server:", value=f"{conf['boosts']} time(s)", inline=False)
-    if conf.get("join_server_url"):
-        e.add_field(name="Must join this server:", value=f"[Join Server]({conf['join_server_url']})", inline=False)
+        e.add_field(name="Must have boosted the server", value=f"{conf['boosts']} time(s)", inline=False)
     bypass = [f"<@&{rid}>" for rid in conf.get("bypass_roles", [])]
     if bypass:
-        e.add_field(name="Requirements Bypass Roles:", value=", ".join(bypass), inline=False)
+        e.add_field(name="Requirements Bypass Roles", value=", ".join(bypass), inline=False)
     if conf.get("image_url"):
         e.set_image(url=conf["image_url"])
     if conf.get("thumbnail_url"):
         e.set_thumbnail(url=conf["thumbnail_url"])
-    e.add_field(name="Ends at", value=f"<t:{int(row['ends_at'])}:f>", inline=False)
     if not active:
         winners = ids(row, "winners_json")
-        e.add_field(name="🏆 Winner(s)", value=", ".join(f"<@{uid}>" for uid in winners) or "No eligible winners.", inline=False)
-    e.set_footer(text=f"Giveaway Boat • Entries: {len(entrants)}")
+        e.add_field(
+            name="🏆 Winner(s)",
+            value=", ".join(f"<@{uid}>" for uid in winners) or "No eligible winners.",
+            inline=False,
+        )
+    e.set_footer(
+        text=f"Giveaway-bot • Good luck everyone! | Today at {datetime.now().astimezone().strftime('%I:%M %p').lstrip('0')}"
+    )
     return e
 
 
@@ -252,20 +270,14 @@ class LeaveEntryView(discord.ui.View):
 class GiveawayView(discord.ui.View):
     def __init__(self, participant_count=0):
         super().__init__(timeout=None)
-        self.enter.label = str(participant_count)
 
-    @discord.ui.button(label="0", emoji="🎉", style=discord.ButtonStyle.primary, custom_id="giveaway_v2:enter")
+    @discord.ui.button(label="Enter Giveaway", emoji="🎉", style=discord.ButtonStyle.success, custom_id="giveaway_v2:enter")
     async def enter(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.change(interaction, True)
 
-    @discord.ui.button(label="Participants", emoji="👥", style=discord.ButtonStyle.secondary, custom_id="giveaway_v2:participants")
-    async def participants(self, interaction: discord.Interaction, button: discord.ui.Button):
-        row = get(interaction.message.id) if interaction.message else None
-        if not row or not interaction.guild:
-            return await interaction.response.send_message("Giveaway not found.", ephemeral=True)
-        can_remove = isinstance(interaction.user, discord.Member) and interaction.user.guild_permissions.manage_guild
-        view = ParticipantView(row, interaction.user.id, can_remove=can_remove)
-        await interaction.response.send_message(embed=view.make_embed(row, interaction.guild), view=view, ephemeral=True)
+    @discord.ui.button(label="Leave Giveaway", emoji="↩️", style=discord.ButtonStyle.secondary, custom_id="giveaway_v2:leave")
+    async def leave(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.change(interaction, False)
 
     async def change(self, interaction: discord.Interaction, enter: bool, message_id=None):
         if not interaction.guild or (not interaction.message and message_id is None):
@@ -573,16 +585,6 @@ class Manager:
                    "entrants_json":"[]","winners_json":"[]","created_at":time.time(),"config_json":json.dumps(conf)}
             try:
                 post=await target.send(embed=embed_for(draft),view=GiveawayView(0))
-                if premium_member is not None:
-                    try:
-                        await target.send(
-                            "**🔥 ALL THE BEST USERS**\n"
-                            "if you won , ping admin or hoster to claim it ",
-                            reference=post,
-                            mention_author=False,
-                        )
-                    except discord.HTTPException:
-                        log.exception("Could not post the Premium First Draw notice for giveaway %s", post.id)
                 if join_invite:
                     try:
                         await target.send(f"**MUST JOIN THIS SERVER TO JOIN THE GIVEAWAY**\n{join_invite.url}")
