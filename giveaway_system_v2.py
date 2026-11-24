@@ -268,53 +268,55 @@ class GiveawayView(discord.ui.View):
         await interaction.response.send_message(embed=view.make_embed(row, interaction.guild), view=view, ephemeral=True)
 
     async def change(self, interaction: discord.Interaction, enter: bool, message_id=None):
+        # Acknowledge the button immediately; database and Discord API work may take longer than Discord's 3-second limit.
+        await interaction.response.defer(ephemeral=True, thinking=True)
         if not interaction.guild or (not interaction.message and message_id is None):
-            return await interaction.response.send_message("Use this in a server giveaway.", ephemeral=True)
+            return await interaction.followup.send("Use this in a server giveaway.", ephemeral=True)
         giveaway_message_id = int(message_id or interaction.message.id)
         row = get(giveaway_message_id)
         if not row or row["status"] != "active" or row["ends_at"] <= time.time():
-            return await interaction.response.send_message("This giveaway has ended.", ephemeral=True)
+            return await interaction.followup.send("This giveaway has ended.", ephemeral=True)
         if interaction.user.bot:
-            return await interaction.response.send_message("Bots cannot enter.", ephemeral=True)
+            return await interaction.followup.send("Bots cannot enter.", ephemeral=True)
         conf = cfg(row)
         member = interaction.user if isinstance(interaction.user, discord.Member) else None
         if member is None:
-            return await interaction.response.send_message("Could not verify your server membership.", ephemeral=True)
+            return await interaction.followup.send("Could not verify your server membership.", ephemeral=True)
         required_guild_id = int(conf.get("join_server_guild_id") or 0)
         if enter and required_guild_id:
             required_guild = interaction.client.get_guild(required_guild_id)
             if required_guild is None:
-                return await interaction.response.send_message("The required server cannot currently be verified. Please contact the giveaway host.", ephemeral=True)
+                return await interaction.followup.send("The required server cannot currently be verified. Please contact the giveaway host.", ephemeral=True)
             try:
                 await required_guild.fetch_member(interaction.user.id)
             except discord.NotFound:
-                return await interaction.response.send_message(
+                return await interaction.followup.send(
                     f"**MUST JOIN THIS SERVER TO JOIN THE GIVEAWAY**\n{conf.get('join_server_url', '')}",
                     ephemeral=True,
                 )
             except discord.Forbidden:
-                return await interaction.response.send_message("I can't verify membership in the required server. The bot needs access to that server's member list.", ephemeral=True)
+                return await interaction.followup.send("I can't verify membership in the required server. The bot needs access to that server's member list.", ephemeral=True)
             except discord.HTTPException:
-                return await interaction.response.send_message("Membership verification is temporarily unavailable. Please try again.", ephemeral=True)
+                return await interaction.followup.send("Membership verification is temporarily unavailable. Please try again.", ephemeral=True)
         entrants = ids(row)
         user_id = interaction.user.id
         if enter and user_id in entrants:
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 "**You already joined the giveaway!**\nClick below if you want to leave.",
                 view=LeaveEntryView(giveaway_message_id),
                 ephemeral=True,
             )
         if not enter and user_id not in entrants:
-            return await interaction.response.send_message("You're not entered.", ephemeral=True)
+            return await interaction.followup.send("You're not entered.", ephemeral=True)
         if enter:
             role_ids = {role.id for role in member.roles}
             bypass = bool(role_ids & set(conf.get("bypass_roles", [])))
             if not bypass:
                 required = conf.get("required_role")
                 if required and required not in role_ids:
-                    return await interaction.response.send_message(f"You need <@&{required}> to enter.", ephemeral=True)
+                    return await interaction.followup.send(f"You need <@&{required}> to enter.", ephemeral=True)
                 if conf.get("boosts", 0) and member.premium_since is None:
-                    return await interaction.response.send_message("You must boost the server to enter.", ephemeral=True)
+                    return await interaction.followup.send("You must boost the server to enter.", ephemeral=True)
                 day = datetime.now(timezone.utc).date().isoformat()
                 with db() as connection:
                     today_row = connection.execute(
@@ -328,7 +330,7 @@ class GiveawayView(discord.ui.View):
                 today = int(today_row["today_count"]) if today_row else 0
                 total = int(total_row["total_count"]) if total_row else 0
                 if today < int(conf.get("messages_today", 0)) or total < int(conf.get("messages_total", 0)):
-                    return await interaction.response.send_message(
+                    return await interaction.followup.send(
                         f"Message requirement not met. Today: {today}/{conf.get('messages_today', 0)}; total: {total}/{conf.get('messages_total', 0)}.",
                         ephemeral=True,
                     )
@@ -343,7 +345,7 @@ class GiveawayView(discord.ui.View):
             channel = await interaction.client.fetch_channel(int(latest["channel_id"]))
         post = interaction.message if interaction.message and interaction.message.id == giveaway_message_id else await channel.fetch_message(giveaway_message_id)
         await post.edit(embed=embed_for(latest), view=GiveawayView(len(entrants)))
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "🎉 **WOW! YOU'VE JOINED THE GIVEAWAY, LET'S GO!** Good luck!" if enter else "You've left the giveaway.",
             ephemeral=True,
         )
