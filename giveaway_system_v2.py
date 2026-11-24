@@ -73,23 +73,37 @@ def embed_for(row):
     host_label = str(conf.get("host_label") or "").strip()
     hosted_by = discord.utils.escape_markdown(host_label) if host_label else f"<@{row['host_id']}>"
     description = (
-        f"**{discord.utils.escape_markdown(row['prize'])}**\n\n"
-        f"Click 🎉 button to enter!\n"
-        f"Winners: **{row['winner_count']}**\n"
-        f"Hosted by: {hosted_by}\n"
+        f"Click 🎉 button to enter!\\n"
+        f"Winners: **{row['winner_count']}**\\n"
+        f"Hosted by: {hosted_by}\\n"
         f"Ends: <t:{int(row['ends_at'])}:R> ([Timer](https://discord.com))"
     )
     if row.get("description"):
-        description += f"\n\n{discord.utils.escape_markdown(row['description'])}"
-    e = discord.Embed(description=description, color=discord.Color.blurple() if active else discord.Color.dark_grey())
-    e.add_field(name="Extra Entries:", value="\n".join(
-        f"<@&{rid}>: **{bonus} entries**" for rid, bonus in conf.get("bonus_roles", [])
-    ) or "None", inline=False)
-    e.add_field(name="Must have the role:", value=f"<@&{conf['required_role']}>" if conf.get("required_role") else "None", inline=False)
-    e.add_field(name="Must have sent:", value=f"• {conf.get('messages_today', 0)} message(s) today\n• {conf.get('messages_total', 0)} messages total", inline=False)
-    e.add_field(name="Must have boosted the server", value=f"{conf.get('boosts', 0)} time(s)", inline=False)
+        description += f"\\n\\n{discord.utils.escape_markdown(row['description'])}"
+    e = discord.Embed(
+        title=discord.utils.escape_markdown(row["prize"]),
+        description=description,
+        color=discord.Color.blurple() if active else discord.Color.dark_grey(),
+    )
+    bonus_roles = conf.get("bonus_roles", [])
+    if bonus_roles:
+        e.add_field(name="Extra Entries:", value="\\n".join(
+            f"<@&{rid}>: **{bonus} entries**" for rid, bonus in bonus_roles
+        ), inline=False)
+    if conf.get("required_role"):
+        e.add_field(name="Must have the role:", value=f"<@&{conf['required_role']}>", inline=False)
+    if conf.get("messages_today", 0) or conf.get("messages_total", 0):
+        requirements = []
+        if conf.get("messages_today", 0):
+            requirements.append(f"• {conf['messages_today']} message(s) today")
+        if conf.get("messages_total", 0):
+            requirements.append(f"• {conf['messages_total']} messages total")
+        e.add_field(name="Must have sent:", value="\\n".join(requirements), inline=False)
+    if conf.get("boosts", 0):
+        e.add_field(name="Must have boosted the server", value=f"{conf['boosts']} time(s)", inline=False)
     bypass = [f"<@&{r}>" for r in conf.get("bypass_roles", [])]
-    e.add_field(name="Requirements Bypass Roles:", value=", ".join(bypass) or "None", inline=False)
+    if bypass:
+        e.add_field(name="Requirements Bypass Roles:", value=", ".join(bypass), inline=False)
     e.add_field(name="Ends at", value=f"<t:{int(row['ends_at'])}:f>", inline=False)
     if conf.get("image_url"):
         e.set_image(url=conf["image_url"])
@@ -141,7 +155,7 @@ class RemoveParticipantModal(discord.ui.Modal, title="Remove a giveaway particip
         try:
             channel = interaction.client.get_channel(int(latest["channel_id"])) or await interaction.client.fetch_channel(int(latest["channel_id"]))
             post = await channel.fetch_message(self.message_id)
-            await post.edit(embed=embed_for(latest), view=GiveawayView() if latest["status"] == "active" else None)
+            await post.edit(embed=embed_for(latest), view=GiveawayView(len(ids(latest))) if latest["status"] == "active" else None)
         except discord.HTTPException:
             log.exception("Could not refresh giveaway post after removing participant")
         await interaction.response.send_message(f"Removed <@{target_id}> from the giveaway.", ephemeral=True)
@@ -211,8 +225,10 @@ class ParticipantView(discord.ui.View):
             return await interaction.response.send_message("You need Manage Server permission to remove a participant.", ephemeral=True)
         await interaction.response.send_modal(RemoveParticipantModal(self.message_id))
 class GiveawayView(discord.ui.View):
-    def __init__(self): super().__init__(timeout=None)
-    @discord.ui.button(label="🎉",style=discord.ButtonStyle.primary,custom_id="giveaway_v2:enter")
+    def __init__(self, participant_count=0):
+        super().__init__(timeout=None)
+        self.enter.label = f"Join Giveaway • {participant_count}"
+    @discord.ui.button(label="Join Giveaway • 0", emoji="🎉", style=discord.ButtonStyle.primary, custom_id="giveaway_v2:enter")
     async def enter(self,i,b): await self.change(i,True)
     @discord.ui.button(label="Participants", emoji="👥", style=discord.ButtonStyle.secondary, custom_id="giveaway_v2:participants")
     async def participants(self, i, b):
@@ -266,7 +282,9 @@ class GiveawayView(discord.ui.View):
         if enter: entrants.append(uid)
         else: entrants.remove(uid)
         save(row["message_id"],entrants_json=json.dumps(entrants))
-        await i.message.edit(embed=embed_for(get(row["message_id"])),view=self)
+        latest = get(row["message_id"])
+        self.enter.label = f"Join Giveaway • {len(entrants)}"
+        await i.message.edit(embed=embed_for(latest), view=self)
         await i.response.send_message("🎉 You're entered! Good luck!" if enter else "You've left the giveaway.",ephemeral=True)
 
 class Manager:
@@ -288,7 +306,8 @@ class Manager:
         if self.restored:return
         with db() as c: rows=c.execute("SELECT message_id,ends_at FROM giveaways WHERE status='active'").fetchall()
         for r in rows:
-            self.client.add_view(GiveawayView(),message_id=int(r["message_id"]))
+            restored = get(int(r["message_id"]))
+            self.client.add_view(GiveawayView(len(ids(restored))) if restored else GiveawayView(), message_id=int(r["message_id"]))
             self.schedule(int(r["message_id"]),float(r["ends_at"]))
         self.restored=True
     def schedule(self,mid,end):
@@ -395,7 +414,7 @@ class Manager:
                    "description":description or "","winner_count":int(winners),"ends_at":end,"status":"active",
                    "entrants_json":"[]","winners_json":"[]","created_at":time.time(),"config_json":json.dumps(conf)}
             try:
-                post=await target.send(embed=embed_for(draft),view=GiveawayView())
+                post=await target.send(embed=embed_for(draft),view=GiveawayView(0))
                 if join_invite:
                     try:
                         await target.send(f"**MUST JOIN THIS SERVER TO JOIN THE GIVEAWAY**\n{join_invite.url}")
