@@ -78,31 +78,31 @@ def embed_for(row):
         "🎊 GIVEAWAY ENDED" if status == "ended" else "🛑 GIVEAWAY CANCELLED"
     )
     e = discord.Embed(title=title, color=color, timestamp=datetime.now(timezone.utc))
-    e.description = f"## 🎁 {discord.utils.escape_markdown(row['prize'])}\\n"
+    e.description = f"## 🎁 {discord.utils.escape_markdown(row['prize'])}\n"
     if row.get("description"):
-        e.description += f"{discord.utils.escape_markdown(row['description'])}\\n\\n"
+        e.description += f"{discord.utils.escape_markdown(row['description'])}\n\n"
     hosted_by = str(conf.get("host_label") or "").strip()
     host_display = discord.utils.escape_markdown(hosted_by) if hosted_by else f"<@{row['host_id']}>"
     e.description += (
-        f"**Hosted by:** {host_display}\\n"
-        f"**Winners:** {row['winner_count']}\\n"
-        f"**Entries:** {len(entrants)}\\n"
+        f"**Hosted by:** {host_display}\n"
+        f"**Winners:** {row['winner_count']}\n"
+        f"**Entries:** {len(entrants)}\n"
     )
     if status == "active":
         e.description += (
-            f"**Ends:** <t:{int(row['ends_at'])}:R> • <t:{int(row['ends_at'])}:f>\\n\\n"
+            f"**Ends:** <t:{int(row['ends_at'])}:R> • <t:{int(row['ends_at'])}:f>\n\n"
             "Click **Enter Giveaway** below to join. You can leave and re-enter before it ends."
         )
     elif status == "ended":
         winners = ids(row, "winners_json")
-        e.description += f"**Ended:** <t:{int(row['ends_at'])}:f>\\n"
+        e.description += f"**Ended:** <t:{int(row['ends_at'])}:f>\n"
         e.add_field(
             name="🏆 Winner(s)",
             value=", ".join(f"<@{uid}>" for uid in winners) or "No valid entries; no winner was selected.",
             inline=False,
         )
     else:
-        e.description += "\\nThis giveaway was cancelled by a moderator."
+        e.description += "\nThis giveaway was cancelled by a moderator."
 
     # Keep optional eligibility and bonus-entry settings, but out of the classic main description.
     details = []
@@ -125,7 +125,7 @@ def embed_for(row):
             f"<@&{rid}> (+{bonus})" for rid, bonus in conf["bonus_roles"]
         ))
     if details:
-        e.add_field(name="Giveaway Requirements", value="\\n".join(details), inline=False)
+        e.add_field(name="Giveaway Requirements", value="\n".join(details), inline=False)
 
     if conf.get("image_url"):
         e.set_image(url=conf["image_url"])
