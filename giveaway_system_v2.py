@@ -232,7 +232,7 @@ class LeaveEntryView(discord.ui.View):
     @discord.ui.button(label="Leave Giveaway", emoji="🚪", style=discord.ButtonStyle.danger)
     async def leave(self, interaction: discord.Interaction, button: discord.ui.Button):
         view = GiveawayView()
-        await view.change(interaction, False)
+        await view.change(interaction, False, self.message_id)
 
 
 class GiveawayView(discord.ui.View):
@@ -249,16 +249,17 @@ class GiveawayView(discord.ui.View):
         can_remove = isinstance(i.user, discord.Member) and i.user.guild_permissions.manage_guild
         view = ParticipantView(row, i.user.id, can_remove=can_remove)
         await i.response.send_message(embed=view.make_embed(row, i.guild), view=view, ephemeral=True)
-    async def change(self,i,enter):
-        if not i.guild or not i.message: return await i.response.send_message("Use this in a server giveaway.",ephemeral=True)
-        row=get(i.message.id)
+    async def change(self,i,enter,message_id=None):
+        if not i.guild or (not i.message and message_id is None): return await i.response.send_message("Use this in a server giveaway.",ephemeral=True)
+        giveaway_message_id = int(message_id or i.message.id)
+        row=get(giveaway_message_id)
         if not row or row["status"]!="active" or row["ends_at"]<=time.time():
             return await i.response.send_message("This giveaway has ended.",ephemeral=True)
         if i.user.bot: return await i.response.send_message("Bots cannot enter.",ephemeral=True)
         conf=cfg(row); member=i.user if isinstance(i.user,discord.Member) else None
         if member is None: return await i.response.send_message("Could not verify your server membership.",ephemeral=True)
         required_guild_id = int(conf.get("join_server_guild_id") or 0)
-        if required_guild_id:
+        if enter and required_guild_id:
             required_guild = i.client.get_guild(required_guild_id)
             if required_guild is None:
                 return await i.response.send_message("The required server cannot currently be verified. Please contact the giveaway host.", ephemeral=True)
@@ -277,7 +278,7 @@ class GiveawayView(discord.ui.View):
         entrants=ids(row); uid=i.user.id
         if enter and uid in entrants:
             return await i.response.send_message(
-                "**You already joined the giveaway!**\\nClick on the button below to leave.",
+                "**You already joined the giveaway!**\nClick on the button below to leave.",
                 view=LeaveEntryView(row["message_id"]),
                 ephemeral=True,
             )
@@ -301,7 +302,13 @@ class GiveawayView(discord.ui.View):
         save(row["message_id"],entrants_json=json.dumps(entrants))
         latest = get(row["message_id"])
         updated_view = GiveawayView(len(entrants))
-        await i.message.edit(embed=embed_for(latest), view=updated_view)
+        target_message = i.message if i.message and i.message.id == giveaway_message_id else None
+        if target_message is None:
+            channel = i.client.get_channel(int(latest["channel_id"]))
+            if channel is None:
+                channel = await i.client.fetch_channel(int(latest["channel_id"]))
+            target_message = await channel.fetch_message(giveaway_message_id)
+        await target_message.edit(embed=embed_for(latest), view=updated_view)
         if enter:
             await i.response.send_message("🎉 **WOW! YOU'VE JOINED THE GIVEAWAY, LET'S GO!** Good luck!", ephemeral=True)
         else:
