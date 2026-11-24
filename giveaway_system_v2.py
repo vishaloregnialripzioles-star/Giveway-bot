@@ -62,11 +62,26 @@ def cfg(row):
     except (TypeError,json.JSONDecodeError): return {}
 
 def parse_duration(s):
-    m=re.fullmatch(r"(\d{1,5})(s|m|h|d)",s.strip(),re.I)
-    if not m: raise ValueError("Use 30s, 10m, 2h, or 1d.")
-    n=int(m.group(1))*{"s":1,"m":60,"h":3600,"d":86400}[m.group(2).lower()]
-    if not 30<=n<=2592000: raise ValueError("Duration must be 30 seconds to 30 days.")
-    return n
+    # "m" means month (30 days); use "min" for minutes to avoid ambiguity.
+    raw = str(s).strip().lower()
+    match = re.fullmatch(r"(\d{1,6})\s*(months?|mos?|mo|mins?|minutes?|seconds?|secs?|s|hours?|hrs?|h|days?|d|weeks?|wks?|wk|w)", raw, re.I)
+    if not match:
+        raise ValueError("Use formats such as 1s, 1min, 2h, 3d, 1w, or 1m (month).")
+
+    amount = int(match.group(1))
+    unit = match.group(2).lower()
+    multipliers = {
+        "s": 1, "sec": 1, "secs": 1, "second": 1, "seconds": 1,
+        "min": 60, "mins": 60, "minute": 60, "minutes": 60,
+        "h": 3600, "hr": 3600, "hrs": 3600, "hour": 3600, "hours": 3600,
+        "d": 86400, "day": 86400, "days": 86400,
+        "w": 604800, "wk": 604800, "wks": 604800, "week": 604800, "weeks": 604800,
+        "m": 2592000, "mo": 2592000, "mos": 2592000, "month": 2592000, "months": 2592000,
+    }
+    seconds = amount * multipliers[unit]
+    if amount < 1 or seconds > 31536000:
+        raise ValueError("Duration must be at least 1 second and no more than 365 days.")
+    return seconds
 
 def embed_for(row):
     """Render the classic giveaway card; Premium details are posted separately."""
