@@ -91,6 +91,8 @@ def embed_for(row):
     bypass = [f"<@&{r}>" for r in conf.get("bypass_roles", [])]
     e.add_field(name="Requirements Bypass Roles:", value=", ".join(bypass) or "None", inline=False)
     e.add_field(name="Ends at", value=f"<t:{int(row['ends_at'])}:f>", inline=False)
+    if conf.get("join_server_url"):
+        e.add_field(name="Must join this server", value=f"[Join required server]({conf['join_server_url']})", inline=False)
     if conf.get("image_url"):
         e.set_image(url=conf["image_url"])
     if conf.get("thumbnail_url"):
@@ -230,6 +232,23 @@ class GiveawayView(discord.ui.View):
         if i.user.bot: return await i.response.send_message("Bots cannot enter.",ephemeral=True)
         conf=cfg(row); member=i.user if isinstance(i.user,discord.Member) else None
         if member is None: return await i.response.send_message("Could not verify your server membership.",ephemeral=True)
+        required_guild_id = int(conf.get("join_server_guild_id") or 0)
+        if required_guild_id:
+            required_guild = i.client.get_guild(required_guild_id)
+            if required_guild is None:
+                return await i.response.send_message("The required server cannot currently be verified. Please contact the giveaway host.", ephemeral=True)
+            try:
+                await required_guild.fetch_member(i.user.id)
+            except discord.NotFound:
+                link = conf.get("join_server_url", "")
+                return await i.response.send_message(
+                    f"**MUST JOIN THIS SERVER TO JOIN THE GIVEAWAY**\\n{link}",
+                    ephemeral=True,
+                )
+            except discord.Forbidden:
+                return await i.response.send_message("I can't verify membership in the required server. The bot needs access to that server's member list.", ephemeral=True)
+            except discord.HTTPException:
+                return await i.response.send_message("Membership verification is temporarily unavailable. Please try again.", ephemeral=True)
         role_ids={r.id for r in member.roles}; bypass=bool(role_ids & set(conf.get("bypass_roles",[])))
         if not bypass:
             required=conf.get("required_role")
@@ -316,6 +335,7 @@ class Manager:
         @app_commands.default_permissions(manage_guild=True)
         @app_commands.describe(
             host_label="Optional custom text shown after Hosted by",
+            join_server="Optional Discord invite; entrants must already be in that server",
             image_url="Optional large giveaway image URL (HTTPS)",
             thumbnail_url="Optional small thumbnail image URL (HTTPS)",
         )
@@ -329,6 +349,7 @@ class Manager:
             messages_today:app_commands.Range[int,0,1000]=0,messages_total:app_commands.Range[int,0,10000]=0,
             boosts:app_commands.Range[int,0,20]=0,
             host_label:app_commands.Range[str,1,80]|None=None,
+            join_server:app_commands.Range[str,8,200]|None=None,
             image_url:app_commands.Range[str,8,500]|None=None,
             thumbnail_url:app_commands.Range[str,8,500]|None=None):
             if not i.guild or not isinstance(i.user,discord.Member) or not i.user.guild_permissions.manage_guild:
@@ -338,6 +359,23 @@ class Manager:
             for label, url in (("image", image_url), ("thumbnail", thumbnail_url)):
                 if url and (not url.startswith("https://") or len(url) > 500):
                     return await i.response.send_message(f"The {label} URL must be an HTTPS image URL.", ephemeral=True)
+            join_invite = None
+            if join_server:
+                match = re.fullmatch(
+                    r"(?:https?://)?(?:www\\.)?(?:discord\\.gg/|discord(?:app)?\\.com/invite/)([A-Za-z0-9-]+)(?:\\?.*)?",
+                    join_server.strip(),
+                    re.IGNORECASE,
+                )
+                if not match:
+                    return await i.followup.send("Please provide a valid Discord invite link (discord.gg/... or discord.com/invite/...).", ephemeral=True)
+                try:
+                    join_invite = await self.client.fetch_invite(match.group(1), with_counts=False)
+                except (discord.NotFound, discord.HTTPException):
+                    return await i.followup.send("I couldn't verify that invite link. Check that it is valid and hasn't expired.", ephemeral=True)
+                if not join_invite.guild:
+                    return await i.followup.send("That invite doesn't point to a server I can verify.", ephemeral=True)
+                if self.client.get_guild(join_invite.guild.id) is None:
+                    return await i.followup.send("The bot must already be a member of the required server before this requirement can be used.", ephemeral=True)
             target=channel or i.channel
             if not isinstance(target,discord.TextChannel): return await i.response.send_message("Choose a text channel.",ephemeral=True)
             await i.response.defer(ephemeral=True,thinking=True)
@@ -350,6 +388,8 @@ class Manager:
                   "bypass_roles":[r.id for r in (bypass_role_1,bypass_role_2) if r],
                   "messages_today":messages_today,"messages_total":messages_total,"boosts":boosts,
                   "host_label":host_label.strip() if host_label else None,
+                  "join_server_url":join_invite.url if join_invite else None,
+                  "join_server_guild_id":join_invite.guild.id if join_invite else None,
                   "image_url":image_url.strip() if image_url else None,
                   "thumbnail_url":thumbnail_url.strip() if thumbnail_url else None}
             draft={"message_id":0,"guild_id":i.guild.id,"channel_id":target.id,"host_id":i.user.id,"prize":prize,
