@@ -69,53 +69,70 @@ def parse_duration(s):
     return n
 
 def embed_for(row):
+    """Render the classic giveaway card; Premium details are posted separately."""
     conf = cfg(row)
-    active = row["status"] == "active"
     entrants = ids(row)
-    hosted_by = str(conf.get("host_label") or "").strip()
-    hosted_by = discord.utils.escape_markdown(hosted_by) if hosted_by else f"<@{row['host_id']}>"
-    description = (
-        f"**{discord.utils.escape_markdown(row['prize'])}**\n"
-        "Click 🎉 button to enter!\n"
-        f"Winners: **{row['winner_count']}**\n"
-        f"Hosted by: {hosted_by}\n"
-        f"Ends: <t:{int(row['ends_at'])}:R> ([Timer](https://discord.com))"
+    status = row["status"]
+    color = discord.Color.blurple() if status == "active" else discord.Color.dark_grey()
+    title = "🎉 GIVEAWAY" if status == "active" else (
+        "🎊 GIVEAWAY ENDED" if status == "ended" else "🛑 GIVEAWAY CANCELLED"
     )
+    e = discord.Embed(title=title, color=color, timestamp=datetime.now(timezone.utc))
+    e.description = f"## 🎁 {discord.utils.escape_markdown(row['prize'])}\\n"
     if row.get("description"):
-        description += f"\n\n{discord.utils.escape_markdown(row['description'])}"
-    e = discord.Embed(description=description, color=discord.Color.blurple() if active else discord.Color.dark_grey())
-    bonus_roles = conf.get("bonus_roles", [])
-    if bonus_roles:
-        e.add_field(name="Extra Entries:", value="\n".join(
-            f"<@&{rid}>: **{bonus} entries**" for rid, bonus in bonus_roles
-        ), inline=False)
+        e.description += f"{discord.utils.escape_markdown(row['description'])}\\n\\n"
+    hosted_by = str(conf.get("host_label") or "").strip()
+    host_display = discord.utils.escape_markdown(hosted_by) if hosted_by else f"<@{row['host_id']}>"
+    e.description += (
+        f"**Hosted by:** {host_display}\\n"
+        f"**Winners:** {row['winner_count']}\\n"
+        f"**Entries:** {len(entrants)}\\n"
+    )
+    if status == "active":
+        e.description += (
+            f"**Ends:** <t:{int(row['ends_at'])}:R> • <t:{int(row['ends_at'])}:f>\\n\\n"
+            "Click **Enter Giveaway** below to join. You can leave and re-enter before it ends."
+        )
+    elif status == "ended":
+        winners = ids(row, "winners_json")
+        e.description += f"**Ended:** <t:{int(row['ends_at'])}:f>\\n"
+        e.add_field(
+            name="🏆 Winner(s)",
+            value=", ".join(f"<@{uid}>" for uid in winners) or "No valid entries; no winner was selected.",
+            inline=False,
+        )
+    else:
+        e.description += "\\nThis giveaway was cancelled by a moderator."
+
+    # Keep optional eligibility and bonus-entry settings, but out of the classic main description.
+    details = []
     if conf.get("required_role"):
-        e.add_field(name="Must have the role:", value=f"<@&{conf['required_role']}>", inline=False)
-    requirements = []
+        details.append(f"**Must have the role:** <@&{conf['required_role']}>")
     if conf.get("messages_today", 0):
-        requirements.append(f"• {conf['messages_today']} messages today")
+        details.append(f"• {conf['messages_today']} messages today")
     if conf.get("messages_total", 0):
-        requirements.append(f"• {conf['messages_total']} messages total")
-    if requirements:
-        e.add_field(name="Must have sent:", value="\n".join(requirements), inline=False)
+        details.append(f"• {conf['messages_total']} messages total")
     if conf.get("boosts", 0):
-        e.add_field(name="Must have boosted the server:", value=f"{conf['boosts']} time(s)", inline=False)
+        details.append(f"**Must have boosted the server:** {conf['boosts']} time(s)")
     if conf.get("join_server_url"):
-        e.add_field(name="Must join this server:", value=f"[Join Server]({conf['join_server_url']})", inline=False)
-    bypass = [f"<@&{rid}>" for rid in conf.get("bypass_roles", [])]
-    if bypass:
-        e.add_field(name="Requirements Bypass Roles:", value=", ".join(bypass), inline=False)
+        details.append(f"**Must join this server:** [Join Server]({conf['join_server_url']})")
+    if conf.get("bypass_roles"):
+        details.append("**Requirements Bypass Roles:** " + ", ".join(
+            f"<@&{rid}>" for rid in conf["bypass_roles"]
+        ))
+    if conf.get("bonus_roles"):
+        details.append("**Extra Entries:** " + ", ".join(
+            f"<@&{rid}> (+{bonus})" for rid, bonus in conf["bonus_roles"]
+        ))
+    if details:
+        e.add_field(name="Giveaway Requirements", value="\\n".join(details), inline=False)
+
     if conf.get("image_url"):
         e.set_image(url=conf["image_url"])
     if conf.get("thumbnail_url"):
         e.set_thumbnail(url=conf["thumbnail_url"])
-    e.add_field(name="Ends at", value=f"<t:{int(row['ends_at'])}:f>", inline=False)
-    if not active:
-        winners = ids(row, "winners_json")
-        e.add_field(name="🏆 Winner(s)", value=", ".join(f"<@{uid}>" for uid in winners) or "No eligible winners.", inline=False)
-    e.set_footer(text=f"Giveaway Boat • Entries: {len(entrants)}")
+    e.set_footer(text="Giveway-bot • Good luck everyone!")
     return e
-
 
 def participant_entry_counts(row, guild):
     conf = cfg(row)
