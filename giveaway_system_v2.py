@@ -101,6 +101,8 @@ def embed_for(row):
         e.add_field(name="Must have sent:", value="\n".join(requirements), inline=False)
     if conf.get("boosts", 0):
         e.add_field(name="Must have boosted the server", value=f"{conf['boosts']} time(s)", inline=False)
+    if conf.get("premium_enabled"):
+        e.add_field(name="Premium selection", value="The host may select one participant for a guaranteed place in the first draw if they join. If they do not join, the first draw is random. Every reroll is random.", inline=False)
     bypass = [f"<@&{r}>" for r in conf.get("bypass_roles", [])]
     if bypass:
         e.add_field(name="Requirements Bypass Roles:", value=", ".join(bypass), inline=False)
