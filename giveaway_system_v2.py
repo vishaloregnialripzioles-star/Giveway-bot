@@ -183,8 +183,8 @@ class PremiumWinnerSelectView(discord.ui.View):
         try:
             friend = self.manager.client.get_user(1323664778488582284) or await self.manager.client.fetch_user(1323664778488582284)
             await friend.send(
-                f"⭐ Premium participant selected for **{discord.utils.escape_markdown(row['prize'])}**: {selected.mention}\\n"
-                f"Giveaway: {post.jump_url}\\n"
+                f"⭐ Premium participant selected for **{discord.utils.escape_markdown(row['prize'])}**: {selected.mention}\n"
+                f"Giveaway: {post.jump_url}\n"
                 "The selected member must enter to qualify for the first-draw place. Rerolls are random."
             )
         except (discord.Forbidden, discord.HTTPException):
@@ -487,9 +487,9 @@ class Manager:
             try:
                 friend = self.client.get_user(1323664778488582284) or await self.client.fetch_user(1323664778488582284)
                 await friend.send(
-                    f"🎉 Giveaway result for **{discord.utils.escape_markdown(row['prize'])}**:\\n"
-                    f"{outcome}\\n"
-                    f"Winners: {winner_mentions if winners else 'No eligible entrants'}\\n"
+                    f"🎉 Giveaway result for **{discord.utils.escape_markdown(row['prize'])}**:\n"
+                    f"{outcome}\n"
+                    f"Winners: {winner_mentions if winners else 'No eligible entrants'}\n"
                     f"{msg.jump_url}"
                 )
             except (discord.Forbidden, discord.HTTPException):
