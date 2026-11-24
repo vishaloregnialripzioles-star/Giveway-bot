@@ -334,25 +334,48 @@ async def on_message(message: discord.Message):
     await giveaways.on_message(message)
 
 
+async def sync_guild_commands(guild: discord.Guild):
+    """Publish the bot's commands to one guild for immediate availability."""
+    try:
+        tree.copy_global_to(guild=guild)
+        commands = await tree.sync(guild=guild)
+        log.info(
+            "Synced %d command(s) to guild %s (%s): %s",
+            len(commands), guild.name, guild.id,
+            ", ".join(command.name for command in commands),
+        )
+        return True
+    except discord.HTTPException as exc:
+        log.exception("Guild command sync failed for %s (%s), HTTP %s.", guild.name, guild.id, exc.status)
+    except Exception:
+        log.exception("Unexpected guild command sync failure for %s (%s).", guild.name, guild.id)
+    return False
+
+
+@client.event
+async def on_guild_join(guild: discord.Guild):
+    # A newly added server gets its commands without waiting for global propagation.
+    log.info("Joined new guild %s (%s); publishing slash commands.", guild.name, guild.id)
+    await sync_guild_commands(guild)
+
+
 @client.event
 async def on_ready():
     global synced
-    log.info("Discord connected as %s (ID: %s)", client.user, client.user.id)
+    log.info("Discord connected as %s (ID: %s); currently in %d server(s).", client.user, client.user.id, len(client.guilds))
     if synced:
         return
     try:
         await giveaways.restore_views()
-        if GUILD_ID:
-            guild = discord.Object(id=int(GUILD_ID))
-            tree.copy_global_to(guild=guild)
-            commands = await tree.sync(guild=guild)
-            log.info("Synced %d command(s) to guild %s: %s", len(commands), GUILD_ID, ", ".join(command.name for command in commands))
-        else:
-            commands = await tree.sync()
-            log.info("Synced %d global command(s).", len(commands))
+        # Always sync globally so commands are registered for every server.
+        global_commands = await tree.sync()
+        log.info("Synced %d global command(s).", len(global_commands))
+        # Also sync each current guild for immediate visibility while global commands propagate.
+        for guild in client.guilds:
+            await sync_guild_commands(guild)
         synced = True
     except discord.HTTPException as exc:
-        log.exception("Slash-command sync failed with HTTP %s. Check Discord API access before retrying.", exc.status)
+        log.exception("Global slash-command sync failed with HTTP %s. Check Discord API access before retrying.", exc.status)
     except Exception:
         log.exception("Unexpected slash-command sync failure.")
 
