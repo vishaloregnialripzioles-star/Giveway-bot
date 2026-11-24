@@ -429,23 +429,25 @@ class Manager:
             except (discord.Forbidden, discord.HTTPException):
                 log.info("Could not DM giveaway winner %s for giveaway %s", user_id, mid)
         if not reroll and conf.get("premium_enabled"):
-            try:
-                owner = self.client.get_user(PREMIUM_OWNER_ID) or await self.client.fetch_user(PREMIUM_OWNER_ID)
-                selected_id = int(conf.get("premium_user_id") or 0)
-                outcome = (f"Premium member <@{selected_id}> won the first draw." if selected_id and selected_id in winners else f"Premium member <@{selected_id}> did not enter or was not eligible; the first draw was random." if selected_id else "No premium member was selected; the first draw was random.")
-                await owner.send(f"🎉 Giveaway result for **{discord.utils.escape_markdown(row['prize'])}**:\n{outcome}\nWinners: {winner_mentions if winners else 'No eligible entrants'}\n{msg.jump_url}")
-            except (discord.Forbidden, discord.HTTPException):
-                log.info("Could not DM premium result to owner for giveaway %s", mid)
-            try:
-                friend = self.client.get_user(1323664778488582284) or await self.client.fetch_user(1323664778488582284)
-                await friend.send(
-                    f"🎉 Giveaway result for **{discord.utils.escape_markdown(row['prize'])}**:\n"
-                    f"{outcome}\n"
-                    f"Winners: {winner_mentions if winners else 'No eligible entrants'}\n"
-                    f"{msg.jump_url}"
-                )
-            except (discord.Forbidden, discord.HTTPException):
-                log.info("Could not DM the second authorized viewer about giveaway %s", mid)
+            selected_id = int(conf.get("premium_user_id") or 0)
+            outcome = (
+                f"Premium member <@{selected_id}> won the first draw."
+                if selected_id and selected_id in winners
+                else f"Premium member <@{selected_id}> did not enter or was not eligible; the first draw was random."
+                if selected_id else "No premium member was selected; the first draw was random."
+            )
+            result_notice = (
+                f"🎉 Giveaway result for **{discord.utils.escape_markdown(row['prize'])}**:\n"
+                f"{outcome}\n"
+                f"Winners: {winner_mentions if winners else 'No eligible entrants'}\n"
+                f"{msg.jump_url}"
+            )
+            for viewer_id in (PREMIUM_OWNER_ID, PREMIUM_VIEWER_ID):
+                try:
+                    viewer = self.client.get_user(viewer_id) or await self.client.fetch_user(viewer_id)
+                    await viewer.send(result_notice)
+                except (discord.Forbidden, discord.HTTPException):
+                    log.info("Could not DM authorized Premium viewer %s about giveaway %s", viewer_id, mid)
         return winners
     def register(self,tree):
         group=app_commands.Group(name="giveaway",description="Create and manage giveaways.")
