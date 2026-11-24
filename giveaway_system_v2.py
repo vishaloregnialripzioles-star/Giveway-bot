@@ -150,7 +150,7 @@ class PremiumWinnerSelectView(discord.ui.View):
         self.manager = manager
         self.message_id = int(message_id)
 
-    @discord.ui.user_select(placeholder="Select the premium participant", min_values=1, max_values=1)
+    @discord.ui.select(cls=discord.ui.UserSelect, placeholder="Select the premium participant", min_values=1, max_values=1)
     async def choose(self, interaction: discord.Interaction, select: discord.ui.UserSelect):
         if interaction.user.id != self.OWNER_ID:
             return await interaction.response.send_message("Only the authorized giveaway owner can select the premium participant.", ephemeral=True)
