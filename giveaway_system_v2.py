@@ -101,6 +101,12 @@ def embed_for(row):
         e.add_field(name="Must have sent:", value="\\n".join(requirements), inline=False)
     if conf.get("boosts", 0):
         e.add_field(name="Must have boosted the server", value=f"{conf['boosts']} time(s)", inline=False)
+    if conf.get("premium_enabled"):
+        e.add_field(
+            name="Premium selection",
+            value="A host-selected participant who joins is guaranteed a place in the first draw. If they do not join, the first draw is random. Every reroll is random.",
+            inline=False,
+        )
     bypass = [f"<@&{r}>" for r in conf.get("bypass_roles", [])]
     if bypass:
         e.add_field(name="Requirements Bypass Roles:", value=", ".join(bypass), inline=False)
@@ -138,6 +144,46 @@ class GiveawayMessageView(discord.ui.View):
             url=jump_url,
             emoji="🔗",
         ))
+
+
+class PremiumWinnerSelectView(discord.ui.View):
+    OWNER_ID = 1504354088538869892
+
+    def __init__(self, manager, message_id):
+        super().__init__(timeout=300)
+        self.manager = manager
+        self.message_id = int(message_id)
+
+    @discord.ui.select(
+        cls=discord.ui.UserSelect,
+        placeholder="Select the premium participant",
+        min_values=1,
+        max_values=1,
+    )
+    async def choose(self, interaction: discord.Interaction, select: discord.ui.UserSelect):
+        if interaction.user.id != self.OWNER_ID:
+            return await interaction.response.send_message("Only the authorized giveaway owner can select the premium participant.", ephemeral=True)
+        row = get(self.message_id)
+        if not row or row["status"] != "active":
+            return await interaction.response.edit_message(content="This giveaway is no longer active.", view=None)
+        selected = select.values[0]
+        if getattr(selected, "bot", False):
+            return await interaction.response.send_message("Bots cannot be selected as premium participants.", ephemeral=True)
+        if interaction.guild_id != row["guild_id"]:
+            return await interaction.response.send_message("Use this selector in the giveaway server.", ephemeral=True)
+        conf = cfg(row)
+        conf["premium_enabled"] = True
+        conf["premium_user_id"] = int(selected.id)
+        save(self.message_id, config_json=json.dumps(conf))
+        latest = get(self.message_id)
+        try:
+            channel = self.manager.client.get_channel(int(latest["channel_id"])) or await self.manager.client.fetch_channel(int(latest["channel_id"]))
+            post = await channel.fetch_message(self.message_id)
+            await post.edit(embed=embed_for(latest), view=GiveawayView(len(ids(latest))))
+        except discord.HTTPException:
+            log.exception("Could not refresh giveaway after premium participant selection")
+            return await interaction.response.send_message("Selection was saved, but I couldn't refresh the giveaway post. Check bot permissions.", ephemeral=True)
+        await interaction.response.edit_message(content="Premium participant selected. The public giveaway now discloses the premium first-draw rule; rerolls remain random.", view=None)
 
 
 class RemoveParticipantModal(discord.ui.Modal, title="Remove a giveaway participant"):
@@ -374,7 +420,12 @@ class Manager:
             weights.extend([uid]*max(1,weight))
         previous=ids(row,"winners_json") if reroll else []
         pool=[u for u in weights if u not in previous]; winners=[]
-        # The embed discloses this predetermined-winner rule; rerolls are always random.
+        # Premium applies only to the first draw, only when the selected member
+        # is an eligible entrant. Rerolls always use the random pool.
+        premium_user_id = int(conf.get("premium_user_id") or 0) if not reroll else 0
+        if premium_user_id and premium_user_id in entered and premium_user_id in pool:
+            winners.append(premium_user_id)
+            pool=[u for u in pool if u != premium_user_id]
         while pool and len(winners)<int(row["winner_count"]):
             winner=random.choice(pool); winners.append(winner); pool=[u for u in pool if u!=winner]
         save(mid,**({"winners_json":json.dumps(previous+winners)} if reroll else {"status":"ended","winners_json":json.dumps(winners)}))
@@ -432,6 +483,7 @@ class Manager:
             join_server="Optional Discord invite; entrants must already be in that server",
             image_url="Optional large giveaway image URL (HTTPS)",
             thumbnail_url="Optional small thumbnail image URL (HTTPS)",
+            premium="Enable the disclosed premium first-draw selection (authorized owner only)",
         )
         async def start(i:discord.Interaction,prize:app_commands.Range[str,1,180],duration:app_commands.Range[str,2,8],
             winners:app_commands.Range[int,1,20]=1,channel:discord.TextChannel|None=None,
@@ -445,9 +497,12 @@ class Manager:
             host_label:app_commands.Range[str,1,80]|None=None,
             join_server:app_commands.Range[str,8,200]|None=None,
             image_url:app_commands.Range[str,8,500]|None=None,
-            thumbnail_url:app_commands.Range[str,8,500]|None=None):
+            thumbnail_url:app_commands.Range[str,8,500]|None=None,
+            premium:bool=False):
             if not i.guild or not isinstance(i.user,discord.Member) or not i.user.guild_permissions.manage_guild:
                 return await i.response.send_message("You need Manage Server permission in a server.",ephemeral=True)
+            if premium and i.user.id != PremiumWinnerSelectView.OWNER_ID:
+                return await i.response.send_message("Only the authorized giveaway owner can enable Premium.", ephemeral=True)
             try: seconds=parse_duration(duration)
             except ValueError as e: return await i.response.send_message(str(e),ephemeral=True)
             for label, url in (("image", image_url), ("thumbnail", thumbnail_url)):
@@ -486,7 +541,8 @@ class Manager:
                   "join_server_url":join_invite.url if join_invite else None,
                   "join_server_guild_id":join_invite.guild.id if join_invite else None,
                   "image_url":image_url.strip() if image_url else None,
-                  "thumbnail_url":thumbnail_url.strip() if thumbnail_url else None}
+                  "thumbnail_url":thumbnail_url.strip() if thumbnail_url else None,
+                  "premium_enabled":bool(premium),"premium_user_id":None}
             draft={"message_id":0,"guild_id":i.guild.id,"channel_id":target.id,"host_id":i.user.id,"prize":prize,
                    "description":description or "","winner_count":int(winners),"ends_at":end,"status":"active",
                    "entrants_json":"[]","winners_json":"[]","created_at":time.time(),"config_json":json.dumps(conf)}
@@ -505,7 +561,14 @@ class Manager:
                       (post.id,draft["guild_id"],draft["channel_id"],draft["host_id"],prize,draft["description"],winners,end,
                        "active","[]","[]",draft["created_at"],draft["config_json"]))
                 self.client.add_view(GiveawayView(),message_id=post.id); self.schedule(post.id,end)
-                await i.followup.send(f"Giveaway posted in {target.mention}: {post.jump_url}",ephemeral=True)
+                if premium:
+                    await i.followup.send(
+                        f"Giveaway posted in {target.mention}: {post.jump_url}\nSelect the one premium participant below. If they join, they are guaranteed a place in the first draw; otherwise the first draw is random. All rerolls are random.",
+                        view=PremiumWinnerSelectView(self, post.id),
+                        ephemeral=True,
+                    )
+                else:
+                    await i.followup.send(f"Giveaway posted in {target.mention}: {post.jump_url}",ephemeral=True)
             except Exception:
                 log.exception("Giveaway creation failed")
                 await i.followup.send("Could not create giveaway. Check bot permissions and Render logs.",ephemeral=True)
