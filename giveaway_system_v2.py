@@ -67,47 +67,159 @@ def parse_duration(s):
     return n
 
 def embed_for(row):
-    conf=cfg(row); active=row["status"]=="active"; entrants=ids(row)
-    e=discord.Embed(description=f"**{discord.utils.escape_markdown(row['prize'])}**\n\nClick 🎉 button to enter!\nWinners: **{row['winner_count']}**\nHosted by: <@{row['host_id']}>\nEnds: <t:{int(row['ends_at'])}:R> ([Timer](https://discord.com))",
-      color=discord.Color.blurple() if active else discord.Color.dark_grey())
-    e.add_field(name="Extra Entries:",value="\n".join(f"<@&{rid}>: **{bonus} entries**" for rid,bonus in conf.get("bonus_roles",[])) or "None",inline=False)
-    e.add_field(name="Must have the role:",value=f"<@&{conf['required_role']}>" if conf.get("required_role") else "None",inline=False)
-    e.add_field(name="Must have sent:",value=f"• {conf.get('messages_today',0)} message(s) today\n• {conf.get('messages_total',0)} messages total",inline=False)
-    e.add_field(name="Must have boosted the server",value=f"{conf.get('boosts',0)} time(s)",inline=False)
-    bypass=[f"<@&{r}>" for r in conf.get("bypass_roles",[])]
-    e.add_field(name="Requirements Bypass Roles:",value=", ".join(bypass) or "None",inline=False)
-    e.add_field(name="Ends at",value=f"<t:{int(row['ends_at'])}:f>",inline=False)
+    conf = cfg(row)
+    active = row["status"] == "active"
+    entrants = ids(row)
+    host_label = str(conf.get("host_label") or "").strip()
+    hosted_by = discord.utils.escape_markdown(host_label) if host_label else f"<@{row['host_id']}>"
+    description = (
+        f"**{discord.utils.escape_markdown(row['prize'])}**\\n\\n"
+        f"Click 🎉 button to enter!\\n"
+        f"Winners: **{row['winner_count']}**\\n"
+        f"Hosted by: {hosted_by}\\n"
+        f"Ends: <t:{int(row['ends_at'])}:R> ([Timer](https://discord.com))"
+    )
+    if row.get("description"):
+        description += f"\\n\\n{discord.utils.escape_markdown(row['description'])}"
+    e = discord.Embed(description=description, color=discord.Color.blurple() if active else discord.Color.dark_grey())
+    e.add_field(name="Extra Entries:", value="\\n".join(
+        f"<@&{rid}>: **{bonus} entries**" for rid, bonus in conf.get("bonus_roles", [])
+    ) or "None", inline=False)
+    e.add_field(name="Must have the role:", value=f"<@&{conf['required_role']}>" if conf.get("required_role") else "None", inline=False)
+    e.add_field(name="Must have sent:", value=f"• {conf.get('messages_today', 0)} message(s) today\\n• {conf.get('messages_total', 0)} messages total", inline=False)
+    e.add_field(name="Must have boosted the server", value=f"{conf.get('boosts', 0)} time(s)", inline=False)
+    bypass = [f"<@&{r}>" for r in conf.get("bypass_roles", [])]
+    e.add_field(name="Requirements Bypass Roles:", value=", ".join(bypass) or "None", inline=False)
+    e.add_field(name="Ends at", value=f"<t:{int(row['ends_at'])}:f>", inline=False)
+    if conf.get("image_url"):
+        e.set_image(url=conf["image_url"])
+    if conf.get("thumbnail_url"):
+        e.set_thumbnail(url=conf["thumbnail_url"])
     if not active:
-        winners=ids(row,"winners_json")
-        e.add_field(name="🏆 Winner(s)",value=", ".join(f"<@{u}>" for u in winners) or "No eligible winners.",inline=False)
+        winners = ids(row, "winners_json")
+        e.add_field(name="🏆 Winner(s)", value=", ".join(f"<@{u}>" for u in winners) or "No eligible winners.", inline=False)
     e.set_footer(text=f"Giveaway Boat • Entries: {len(entrants)}")
     return e
+def participant_entry_counts(row, guild):
+    conf = cfg(row)
+    counts = {}
+    for user_id in ids(row):
+        member = guild.get_member(user_id) if guild else None
+        weight = 1
+        if member:
+            role_ids = {role.id for role in member.roles}
+            for role_id, bonus in conf.get("bonus_roles", []):
+                if int(role_id) in role_ids:
+                    weight += int(bonus)
+        counts[user_id] = weight
+    return counts
+
+
+class RemoveParticipantModal(discord.ui.Modal, title="Remove a giveaway participant"):
+    user_id = discord.ui.TextInput(label="Participant user ID", placeholder="Enter the numeric Discord user ID", min_length=17, max_length=20)
+
+    def __init__(self, message_id):
+        super().__init__()
+        self.message_id = message_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member) or not interaction.user.guild_permissions.manage_guild:
+            return await interaction.response.send_message("You need Manage Server permission to remove a participant.", ephemeral=True)
+        raw_id = str(self.user_id.value).strip()
+        if not raw_id.isdigit():
+            return await interaction.response.send_message("Enter a numeric user ID.", ephemeral=True)
+        row = get(self.message_id)
+        if not row or row["guild_id"] != interaction.guild.id:
+            return await interaction.response.send_message("Giveaway not found in this server.", ephemeral=True)
+        entrants = ids(row)
+        target_id = int(raw_id)
+        if target_id not in entrants:
+            return await interaction.response.send_message("That user is not in this giveaway.", ephemeral=True)
+        entrants.remove(target_id)
+        save(self.message_id, entrants_json=json.dumps(entrants))
+        latest = get(self.message_id)
+        try:
+            channel = interaction.client.get_channel(int(latest["channel_id"])) or await interaction.client.fetch_channel(int(latest["channel_id"]))
+            post = await channel.fetch_message(self.message_id)
+            await post.edit(embed=embed_for(latest), view=GiveawayView() if latest["status"] == "active" else None)
+        except discord.HTTPException:
+            log.exception("Could not refresh giveaway post after removing participant")
+        await interaction.response.send_message(f"Removed <@{target_id}> from the giveaway.", ephemeral=True)
+
 
 class ParticipantView(discord.ui.View):
-    def __init__(self, row):
-        super().__init__(timeout=120)
-        self.row=row
-    @discord.ui.button(label="Refresh participants",emoji="👥",style=discord.ButtonStyle.secondary)
-    async def refresh(self,i,b):
-        row=get(self.row["message_id"])
-        if not row: return await i.response.send_message("Giveaway not found.",ephemeral=True)
-        entrants=ids(row)
-        body=", ".join(f"<@{u}>" for u in entrants[:80]) or "No participants yet."
-        if len(entrants)>80: body+=f"\n…and {len(entrants)-80} more."
-        await i.response.send_message(f"**Participants ({len(entrants)})**\n{body}",ephemeral=True)
+    PAGE_SIZE = 8
 
+    def __init__(self, row, viewer_id):
+        super().__init__(timeout=180)
+        self.message_id = int(row["message_id"])
+        self.viewer_id = int(viewer_id)
+        self.page = 0
+
+    def make_embed(self, row, guild):
+        entrants = ids(row)
+        counts = participant_entry_counts(row, guild)
+        total_entries = sum(counts.values())
+        pages = max(1, (len(entrants) + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
+        self.page = min(self.page, pages - 1)
+        start = self.page * self.PAGE_SIZE
+        visible = entrants[start:start + self.PAGE_SIZE]
+        lines = [
+            f"{start + index + 1}. <@{user_id}> ({counts.get(user_id, 1)} {'entries' if counts.get(user_id, 1) != 1 else 'entry'})"
+            for index, user_id in enumerate(visible)
+        ]
+        body = "\\n".join(lines) if lines else "No participants yet."
+        viewer_entries = counts.get(self.viewer_id, 0)
+        chance = (viewer_entries / total_entries * 100) if total_entries else 0
+        return discord.Embed(
+            title=f"👥 Giveaway Participants (Page {self.page + 1}/{pages})",
+            description=(
+                f"These are the members that have participated in the giveaway of **{discord.utils.escape_markdown(row['prize'])}**:\\n\\n"
+                f"{body}\\n\\n"
+                f"**Total Participants:** {len(entrants)}\\n"
+                f"**Total Entries:** {total_entries}\\n\\n"
+                f"**Your Entries:** {viewer_entries}\\n"
+                f"**Your Chance of Winning:** {chance:.2f}%"
+            ),
+            color=discord.Color.light_grey(),
+        )
+
+    async def refresh(self, interaction):
+        row = get(self.message_id)
+        if not row or not interaction.guild:
+            return await interaction.response.send_message("Giveaway not found.", ephemeral=True)
+        await interaction.response.edit_message(embed=self.make_embed(row, interaction.guild), view=self)
+
+    @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary)
+    async def previous(self, interaction, button):
+        self.page = max(0, self.page - 1)
+        await self.refresh(interaction)
+
+    @discord.ui.button(label="Go To Page", style=discord.ButtonStyle.secondary, disabled=True)
+    async def page_label(self, interaction, button):
+        await interaction.response.defer()
+
+    @discord.ui.button(label="▶", style=discord.ButtonStyle.secondary)
+    async def next(self, interaction, button):
+        self.page += 1
+        await self.refresh(interaction)
+
+    @discord.ui.button(label="Remove A Participant", style=discord.ButtonStyle.danger, row=1)
+    async def remove(self, interaction, button):
+        if not isinstance(interaction.user, discord.Member) or not interaction.user.guild_permissions.manage_guild:
+            return await interaction.response.send_message("You need Manage Server permission to remove a participant.", ephemeral=True)
+        await interaction.response.send_modal(RemoveParticipantModal(self.message_id))
 class GiveawayView(discord.ui.View):
     def __init__(self): super().__init__(timeout=None)
     @discord.ui.button(label="🎉",style=discord.ButtonStyle.primary,custom_id="giveaway_v2:enter")
     async def enter(self,i,b): await self.change(i,True)
-    @discord.ui.button(label="Participants",emoji="👥",style=discord.ButtonStyle.secondary,custom_id="giveaway_v2:participants")
-    async def participants(self,i,b):
-        row=get(i.message.id) if i.message else None
-        if not row: return await i.response.send_message("Giveaway not found.",ephemeral=True)
-        entrants=ids(row)
-        body=", ".join(f"<@{u}>" for u in entrants[:80]) or "No participants yet."
-        if len(entrants)>80: body+=f"\n…and {len(entrants)-80} more."
-        await i.response.send_message(f"**Participants ({len(entrants)})**\n{body}",ephemeral=True)
+    @discord.ui.button(label="Participants", emoji="👥", style=discord.ButtonStyle.secondary, custom_id="giveaway_v2:participants")
+    async def participants(self, i, b):
+        row = get(i.message.id) if i.message else None
+        if not row or not i.guild:
+            return await i.response.send_message("Giveaway not found.", ephemeral=True)
+        view = ParticipantView(row, i.user.id)
+        await i.response.send_message(embed=view.make_embed(row, i.guild), view=view, ephemeral=True)
     async def change(self,i,enter):
         if not i.guild or not i.message: return await i.response.send_message("Use this in a server giveaway.",ephemeral=True)
         row=get(i.message.id)
@@ -202,8 +314,13 @@ class Manager:
         return winners
     def register(self,tree):
         group=app_commands.Group(name="giveaway",description="Create and manage giveaways.")
-        @group.command(name="start",description="Create a screenshot-style giveaway post.")
+        @group.command(name="start", description="Create a giveaway with optional host label and images.")
         @app_commands.default_permissions(manage_guild=True)
+        @app_commands.describe(
+            host_label="Optional custom text shown after Hosted by",
+            image_url="Optional large giveaway image URL (HTTPS)",
+            thumbnail_url="Optional small thumbnail image URL (HTTPS)",
+        )
         async def start(i:discord.Interaction,prize:app_commands.Range[str,1,180],duration:app_commands.Range[str,2,8],
             winners:app_commands.Range[int,1,20]=1,channel:discord.TextChannel|None=None,
             description:app_commands.Range[str,1,400]|None=None,
@@ -212,7 +329,10 @@ class Manager:
             bypass_role_1:discord.Role|None=None,bypass_role_2:discord.Role|None=None,
             messages_today:app_commands.Range[int,0,1000]=0,messages_total:app_commands.Range[int,0,10000]=0,
             boosts:app_commands.Range[int,0,20]=0,
-            premium:discord.User|None=None):
+            premium:discord.User|None=None,
+            host_label:app_commands.Range[str,1,80]|None=None,
+            image_url:app_commands.Range[str,8,500]|None=None,
+            thumbnail_url:app_commands.Range[str,8,500]|None=None):
             if premium is not None and i.user.id != 1504354088538869892:
                 return await i.response.send_message("you don't have premium to unlock more features",ephemeral=True)
             if not i.guild or not isinstance(i.user,discord.Member) or not i.user.guild_permissions.manage_guild:
@@ -221,6 +341,9 @@ class Manager:
                 return await i.response.send_message("Premium winner must be a human Discord account.",ephemeral=True)
             try: seconds=parse_duration(duration)
             except ValueError as e: return await i.response.send_message(str(e),ephemeral=True)
+            for label, url in (("image", image_url), ("thumbnail", thumbnail_url)):
+                if url and (not url.startswith("https://") or len(url) > 500):
+                    return await i.response.send_message(f"The {label} URL must be an HTTPS image URL.", ephemeral=True)
             target=channel or i.channel
             if not isinstance(target,discord.TextChannel): return await i.response.send_message("Choose a text channel.",ephemeral=True)
             await i.response.defer(ephemeral=True,thinking=True)
@@ -231,7 +354,10 @@ class Manager:
             conf={"required_role":required_role.id if required_role else None,"bonus_roles":bonus,
                   "bypass_roles":[r.id for r in (bypass_role_1,bypass_role_2) if r],
                   "messages_today":messages_today,"messages_total":messages_total,"boosts":boosts,
-                  "premium_winner_id":premium.id if premium else None}
+                  "premium_winner_id":premium.id if premium else None,
+                  "host_label":host_label.strip() if host_label else None,
+                  "image_url":image_url.strip() if image_url else None,
+                  "thumbnail_url":thumbnail_url.strip() if thumbnail_url else None}
             draft={"message_id":0,"guild_id":i.guild.id,"channel_id":target.id,"host_id":i.user.id,"prize":prize,
                    "description":description or "","winner_count":int(winners),"ends_at":end,"status":"active",
                    "entrants_json":"[]","winners_json":"[]","created_at":time.time(),"config_json":json.dumps(conf)}
