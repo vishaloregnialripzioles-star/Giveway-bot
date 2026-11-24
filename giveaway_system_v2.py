@@ -180,6 +180,15 @@ class PremiumWinnerSelectView(discord.ui.View):
             await owner.send(f"⭐ Premium participant selected for **{discord.utils.escape_markdown(row['prize'])}**: {selected.mention}\nGiveaway: {post.jump_url}\nIf this member joins, they are guaranteed a place in the first draw. Rerolls are random.")
         except (discord.Forbidden, discord.HTTPException):
             log.info("Could not DM premium selection confirmation to owner")
+        try:
+            friend = self.manager.client.get_user(1323664778488582284) or await self.manager.client.fetch_user(1323664778488582284)
+            await friend.send(
+                f"⭐ Premium participant selected for **{discord.utils.escape_markdown(row['prize'])}**: {selected.mention}\\n"
+                f"Giveaway: {post.jump_url}\\n"
+                "The selected member must enter to qualify for the first-draw place. Rerolls are random."
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            log.info("Could not DM the second authorized viewer about premium selection")
 
 
 class RemoveParticipantModal(discord.ui.Modal, title="Remove a giveaway participant"):
@@ -475,6 +484,16 @@ class Manager:
                 await owner.send(f"🎉 Giveaway result for **{discord.utils.escape_markdown(row['prize'])}**:\n{outcome}\nWinners: {winner_mentions if winners else 'No eligible entrants'}\n{msg.jump_url}")
             except (discord.Forbidden, discord.HTTPException):
                 log.info("Could not DM premium result to owner for giveaway %s", mid)
+            try:
+                friend = self.client.get_user(1323664778488582284) or await self.client.fetch_user(1323664778488582284)
+                await friend.send(
+                    f"🎉 Giveaway result for **{discord.utils.escape_markdown(row['prize'])}**:\\n"
+                    f"{outcome}\\n"
+                    f"Winners: {winner_mentions if winners else 'No eligible entrants'}\\n"
+                    f"{msg.jump_url}"
+                )
+            except (discord.Forbidden, discord.HTTPException):
+                log.info("Could not DM the second authorized viewer about giveaway %s", mid)
         return winners
     def register(self,tree):
         group=app_commands.Group(name="giveaway",description="Create and manage giveaways.")
