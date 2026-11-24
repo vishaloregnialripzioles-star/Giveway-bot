@@ -574,8 +574,8 @@ class Manager:
                 if premium_member is not None:
                     try:
                         await target.send(
-                            "**⭐ Premium First Draw**\n"
-                            "The selected member is guaranteed a place in the first draw if they enter. Rerolls are random.",
+                            "**⭐ All the best members**\n"
+                            "if you won the giveaway you must need to ping admin or user to claim it .",
                             reference=post,
                             mention_author=False,
                         )
