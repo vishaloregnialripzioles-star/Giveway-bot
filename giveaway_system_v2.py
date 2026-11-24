@@ -73,21 +73,21 @@ def embed_for(row):
     host_label = str(conf.get("host_label") or "").strip()
     hosted_by = discord.utils.escape_markdown(host_label) if host_label else f"<@{row['host_id']}>"
     description = (
-        f"# {discord.utils.escape_markdown(row["prize"])}\\n"
-        f"Click 🎉 button to enter!\\n"
-        f"Winners: **{row['winner_count']}**\\n"
-        f"Hosted by: {hosted_by}\\n"
+        f"# {discord.utils.escape_markdown(row["prize"])}\n"
+        f"Click 🎉 button to enter!\n"
+        f"Winners: **{row['winner_count']}**\n"
+        f"Hosted by: {hosted_by}\n"
         f"Ends: <t:{int(row['ends_at'])}:R> ([Timer](https://discord.com))"
     )
     if row.get("description"):
-        description += f"\\n\\n{discord.utils.escape_markdown(row['description'])}"
+        description += f"\n\n{discord.utils.escape_markdown(row['description'])}"
     e = discord.Embed(
         description=description,
         color=discord.Color.blurple() if active else discord.Color.dark_grey(),
     )
     bonus_roles = conf.get("bonus_roles", [])
     if bonus_roles:
-        e.add_field(name="Extra Entries:", value="\\n".join(
+        e.add_field(name="Extra Entries:", value="\n".join(
             f"<@&{rid}>: **{bonus} entries**" for rid, bonus in bonus_roles
         ), inline=False)
     if conf.get("required_role"):
@@ -98,11 +98,9 @@ def embed_for(row):
             requirements.append(f"• {conf['messages_today']} message(s) today")
         if conf.get("messages_total", 0):
             requirements.append(f"• {conf['messages_total']} messages total")
-        e.add_field(name="Must have sent:", value="\\n".join(requirements), inline=False)
+        e.add_field(name="Must have sent:", value="\n".join(requirements), inline=False)
     if conf.get("boosts", 0):
         e.add_field(name="Must have boosted the server", value=f"{conf['boosts']} time(s)", inline=False)
-    if conf.get("premium_enabled"):
-        e.add_field(name="Premium selection", value="The host may select one participant for a guaranteed place in the first draw if they join. If they do not join, the first draw is random. Every reroll is random.", inline=False)
     bypass = [f"<@&{r}>" for r in conf.get("bypass_roles", [])]
     if bypass:
         e.add_field(name="Requirements Bypass Roles:", value=", ".join(bypass), inline=False)
@@ -444,8 +442,8 @@ class Manager:
             result_embed = discord.Embed(
                 description=(
                     f"{winner_mentions if winners else 'No eligible entrants'} won the giveaway of "
-                    f"**{discord.utils.escape_markdown(row['prize'])}!**\\n\\n"
-                    f"• Hosted by: <@{row['host_id']}>\\n"
+                    f"**{discord.utils.escape_markdown(row['prize'])}!**\n\n"
+                    f"• Hosted by: <@{row['host_id']}>\n"
                     f"• Reroll Command: `/giveaway reroll message_id:{mid}`"
                 ),
                 color=discord.Color.blurple(),
@@ -458,8 +456,8 @@ class Manager:
                 user = self.client.get_user(int(user_id)) or await self.client.fetch_user(int(user_id))
                 dm_embed = discord.Embed(
                     description=(
-                        f"You won the giveaway of **{discord.utils.escape_markdown(row['prize'])}!**\\n\\n"
-                        f"• Hosted by: <@{row['host_id']}>\\n"
+                        f"You won the giveaway of **{discord.utils.escape_markdown(row['prize'])}!**\n\n"
+                        f"• Hosted by: <@{row['host_id']}>\n"
                         f"• Reroll Command: `/giveaway reroll message_id:{mid}`"
                     ),
                     color=discord.Color.blurple(),
