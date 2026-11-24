@@ -150,11 +150,12 @@ class RemoveParticipantModal(discord.ui.Modal, title="Remove a giveaway particip
 class ParticipantView(discord.ui.View):
     PAGE_SIZE = 8
 
-    def __init__(self, row, viewer_id):
+    def __init__(self, row, viewer_id, can_remove=False):
         super().__init__(timeout=180)
         self.message_id = int(row["message_id"])
         self.viewer_id = int(viewer_id)
         self.page = 0
+        self.remove.disabled = not can_remove
 
     def make_embed(self, row, guild):
         entrants = ids(row)
@@ -218,7 +219,8 @@ class GiveawayView(discord.ui.View):
         row = get(i.message.id) if i.message else None
         if not row or not i.guild:
             return await i.response.send_message("Giveaway not found.", ephemeral=True)
-        view = ParticipantView(row, i.user.id)
+        can_remove = isinstance(i.user, discord.Member) and i.user.guild_permissions.manage_guild
+        view = ParticipantView(row, i.user.id, can_remove=can_remove)
         await i.response.send_message(embed=view.make_embed(row, i.guild), view=view, ephemeral=True)
     async def change(self,i,enter):
         if not i.guild or not i.message: return await i.response.send_message("Use this in a server giveaway.",ephemeral=True)
