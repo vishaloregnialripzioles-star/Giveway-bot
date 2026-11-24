@@ -64,7 +64,7 @@ def cfg(row):
 def parse_duration(s):
     # "m" means month (30 days); use "min" for minutes to avoid ambiguity.
     raw = str(s).strip().lower()
-    match = re.fullmatch(r"(\d{1,6})\s*(months?|mos?|mo|mins?|minutes?|seconds?|secs?|s|hours?|hrs?|h|days?|d|weeks?|wks?|wk|w)", raw, re.I)
+    match = re.fullmatch(r"(\d{1,6})\s*(months?|mos?|mo|m|mins?|minutes?|seconds?|secs?|s|hours?|hrs?|h|days?|d|weeks?|wks?|wk|w)", raw, re.I)
     if not match:
         raise ValueError("Use formats such as 1s, 1min, 2h, 3d, 1w, or 1m (month).")
 
