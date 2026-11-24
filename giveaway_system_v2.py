@@ -73,20 +73,20 @@ def embed_for(row):
     host_label = str(conf.get("host_label") or "").strip()
     hosted_by = discord.utils.escape_markdown(host_label) if host_label else f"<@{row['host_id']}>"
     description = (
-        f"**{discord.utils.escape_markdown(row['prize'])}**\\n\\n"
-        f"Click 🎉 button to enter!\\n"
-        f"Winners: **{row['winner_count']}**\\n"
-        f"Hosted by: {hosted_by}\\n"
+        f"**{discord.utils.escape_markdown(row['prize'])}**\n\n"
+        f"Click 🎉 button to enter!\n"
+        f"Winners: **{row['winner_count']}**\n"
+        f"Hosted by: {hosted_by}\n"
         f"Ends: <t:{int(row['ends_at'])}:R> ([Timer](https://discord.com))"
     )
     if row.get("description"):
-        description += f"\\n\\n{discord.utils.escape_markdown(row['description'])}"
+        description += f"\n\n{discord.utils.escape_markdown(row['description'])}"
     e = discord.Embed(description=description, color=discord.Color.blurple() if active else discord.Color.dark_grey())
-    e.add_field(name="Extra Entries:", value="\\n".join(
+    e.add_field(name="Extra Entries:", value="\n".join(
         f"<@&{rid}>: **{bonus} entries**" for rid, bonus in conf.get("bonus_roles", [])
     ) or "None", inline=False)
     e.add_field(name="Must have the role:", value=f"<@&{conf['required_role']}>" if conf.get("required_role") else "None", inline=False)
-    e.add_field(name="Must have sent:", value=f"• {conf.get('messages_today', 0)} message(s) today\\n• {conf.get('messages_total', 0)} messages total", inline=False)
+    e.add_field(name="Must have sent:", value=f"• {conf.get('messages_today', 0)} message(s) today\n• {conf.get('messages_total', 0)} messages total", inline=False)
     e.add_field(name="Must have boosted the server", value=f"{conf.get('boosts', 0)} time(s)", inline=False)
     bypass = [f"<@&{r}>" for r in conf.get("bypass_roles", [])]
     e.add_field(name="Requirements Bypass Roles:", value=", ".join(bypass) or "None", inline=False)
@@ -168,17 +168,17 @@ class ParticipantView(discord.ui.View):
             f"{start + index + 1}. <@{user_id}> ({counts.get(user_id, 1)} {'entries' if counts.get(user_id, 1) != 1 else 'entry'})"
             for index, user_id in enumerate(visible)
         ]
-        body = "\\n".join(lines) if lines else "No participants yet."
+        body = "\n".join(lines) if lines else "No participants yet."
         viewer_entries = counts.get(self.viewer_id, 0)
         chance = (viewer_entries / total_entries * 100) if total_entries else 0
         return discord.Embed(
             title=f"👥 Giveaway Participants (Page {self.page + 1}/{pages})",
             description=(
-                f"These are the members that have participated in the giveaway of **{discord.utils.escape_markdown(row['prize'])}**:\\n\\n"
-                f"{body}\\n\\n"
-                f"**Total Participants:** {len(entrants)}\\n"
-                f"**Total Entries:** {total_entries}\\n\\n"
-                f"**Your Entries:** {viewer_entries}\\n"
+                f"These are the members that have participated in the giveaway of **{discord.utils.escape_markdown(row['prize'])}**:\n\n"
+                f"{body}\n\n"
+                f"**Total Participants:** {len(entrants)}\n"
+                f"**Total Entries:** {total_entries}\n\n"
+                f"**Your Entries:** {viewer_entries}\n"
                 f"**Your Chance of Winning:** {chance:.2f}%"
             ),
             color=discord.Color.light_grey(),
