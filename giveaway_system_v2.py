@@ -73,6 +73,7 @@ def embed_for(row):
     host_label = str(conf.get("host_label") or "").strip()
     hosted_by = discord.utils.escape_markdown(host_label) if host_label else f"<@{row['host_id']}>"
     description = (
+        f"# {discord.utils.escape_markdown(row["prize"])}\\n"
         f"Click 🎉 button to enter!\\n"
         f"Winners: **{row['winner_count']}**\\n"
         f"Hosted by: {hosted_by}\\n"
@@ -81,7 +82,6 @@ def embed_for(row):
     if row.get("description"):
         description += f"\\n\\n{discord.utils.escape_markdown(row['description'])}"
     e = discord.Embed(
-        title=discord.utils.escape_markdown(row["prize"]),
         description=description,
         color=discord.Color.blurple() if active else discord.Color.dark_grey(),
     )
@@ -227,8 +227,8 @@ class ParticipantView(discord.ui.View):
 class GiveawayView(discord.ui.View):
     def __init__(self, participant_count=0):
         super().__init__(timeout=None)
-        self.enter.label = f"Join Giveaway • {participant_count}"
-    @discord.ui.button(label="Join Giveaway • 0", emoji="🎉", style=discord.ButtonStyle.primary, custom_id="giveaway_v2:enter")
+        self.enter.label = str(participant_count)
+    @discord.ui.button(label="0", emoji="🎉", style=discord.ButtonStyle.primary, custom_id="giveaway_v2:enter")
     async def enter(self,i,b): await self.change(i,True)
     @discord.ui.button(label="Participants", emoji="👥", style=discord.ButtonStyle.secondary, custom_id="giveaway_v2:participants")
     async def participants(self, i, b):
@@ -283,9 +283,12 @@ class GiveawayView(discord.ui.View):
         else: entrants.remove(uid)
         save(row["message_id"],entrants_json=json.dumps(entrants))
         latest = get(row["message_id"])
-        self.enter.label = f"Join Giveaway • {len(entrants)}"
-        await i.message.edit(embed=embed_for(latest), view=self)
-        await i.response.send_message("🎉 You're entered! Good luck!" if enter else "You've left the giveaway.",ephemeral=True)
+        updated_view = GiveawayView(len(entrants))
+        await i.message.edit(embed=embed_for(latest), view=updated_view)
+        if enter:
+            await i.response.send_message("🎉 **WOW! YOU'VE JOINED THE GIVEAWAY, LET'S GO!** Good luck!", ephemeral=True)
+        else:
+            await i.response.send_message("You've left the giveaway.", ephemeral=True)
 
 class Manager:
     def __init__(self,client):
