@@ -324,6 +324,7 @@ class Manager:
             description:app_commands.Range[str,1,400]|None=None,
             required_role:discord.Role|None=None,bonus_role_1:discord.Role|None=None,bonus_entries_1:app_commands.Range[int,0,20]=0,
             bonus_role_2:discord.Role|None=None,bonus_entries_2:app_commands.Range[int,0,20]=0,
+            bonus_role_3:discord.Role|None=None,bonus_entries_3:app_commands.Range[int,0,20]=0,
             bypass_role_1:discord.Role|None=None,bypass_role_2:discord.Role|None=None,
             messages_today:app_commands.Range[int,0,1000]=0,messages_total:app_commands.Range[int,0,10000]=0,
             boosts:app_commands.Range[int,0,20]=0,
@@ -344,6 +345,7 @@ class Manager:
             bonus=[]
             if bonus_role_1 and bonus_entries_1: bonus.append([bonus_role_1.id,bonus_entries_1])
             if bonus_role_2 and bonus_entries_2: bonus.append([bonus_role_2.id,bonus_entries_2])
+            if bonus_role_3 and bonus_entries_3: bonus.append([bonus_role_3.id,bonus_entries_3])
             conf={"required_role":required_role.id if required_role else None,"bonus_roles":bonus,
                   "bypass_roles":[r.id for r in (bypass_role_1,bypass_role_2) if r],
                   "messages_today":messages_today,"messages_total":messages_total,"boosts":boosts,
