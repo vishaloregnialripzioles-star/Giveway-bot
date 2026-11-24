@@ -371,13 +371,31 @@ class Manager:
               DO UPDATE SET total_count=giveaway_message_totals.total_count+1""",
               (message.guild.id,message.author.id))
     async def restore_views(self):
-        if self.restored:return
-        with db() as c: rows=c.execute("SELECT message_id,ends_at FROM giveaways WHERE status='active'").fetchall()
-        for r in rows:
-            restored = get(int(r["message_id"]))
-            self.client.add_view(GiveawayView(len(ids(restored))) if restored else GiveawayView(), message_id=int(r["message_id"]))
-            self.schedule(int(r["message_id"]),float(r["ends_at"]))
-        self.restored=True
+        if self.restored:
+            return
+        with db() as c:
+            rows = c.execute(
+                "SELECT message_id, ends_at FROM giveaways WHERE status='active'"
+            ).fetchall()
+        for item in rows:
+            message_id = int(item["message_id"])
+            restored = get(message_id)
+            if restored:
+                view = GiveawayView(len(ids(restored)))
+                self.client.add_view(view, message_id=message_id)
+                try:
+                    channel = self.client.get_channel(int(restored["channel_id"]))
+                    if channel is None:
+                        channel = await self.client.fetch_channel(int(restored["channel_id"]))
+                    post = await channel.fetch_message(message_id)
+                    await post.edit(embed=embed_for(restored), view=GiveawayView(len(ids(restored))))
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    log.exception("Could not refresh classic layout for active giveaway %s", message_id)
+            else:
+                self.client.add_view(GiveawayView(), message_id=message_id)
+            self.schedule(message_id, float(item["ends_at"]))
+        self.restored = True
+
     def schedule(self,mid,end):
         if mid in self.tasks and not self.tasks[mid].done(): return
         self.tasks[mid]=asyncio.create_task(self.end_later(mid,end))
