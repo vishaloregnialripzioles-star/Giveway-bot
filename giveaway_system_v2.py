@@ -91,8 +91,6 @@ def embed_for(row):
     bypass = [f"<@&{r}>" for r in conf.get("bypass_roles", [])]
     e.add_field(name="Requirements Bypass Roles:", value=", ".join(bypass) or "None", inline=False)
     e.add_field(name="Ends at", value=f"<t:{int(row['ends_at'])}:f>", inline=False)
-    if conf.get("join_server_url"):
-        e.add_field(name="Must join this server", value=f"[Join required server]({conf['join_server_url']})", inline=False)
     if conf.get("image_url"):
         e.set_image(url=conf["image_url"])
     if conf.get("thumbnail_url"):
@@ -242,7 +240,7 @@ class GiveawayView(discord.ui.View):
             except discord.NotFound:
                 link = conf.get("join_server_url", "")
                 return await i.response.send_message(
-                    f"**MUST JOIN THIS SERVER TO JOIN THE GIVEAWAY**\\n{link}",
+                    f"**MUST JOIN THIS SERVER TO JOIN THE GIVEAWAY**\n{link}",
                     ephemeral=True,
                 )
             except discord.Forbidden:
@@ -398,6 +396,11 @@ class Manager:
                    "entrants_json":"[]","winners_json":"[]","created_at":time.time(),"config_json":json.dumps(conf)}
             try:
                 post=await target.send(embed=embed_for(draft),view=GiveawayView())
+                if join_invite:
+                    try:
+                        await target.send(f"**MUST JOIN THIS SERVER TO JOIN THE GIVEAWAY**\n{join_invite.url}")
+                    except discord.HTTPException:
+                        log.exception("Could not post the required-server link below the giveaway")
                 draft["message_id"]=post.id
                 with db() as c:
                     c.execute("""INSERT INTO giveaways(message_id,guild_id,channel_id,host_id,prize,description,winner_count,
