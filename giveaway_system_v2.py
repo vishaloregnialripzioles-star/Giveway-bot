@@ -445,46 +445,44 @@ class Manager:
         winner_mentions = ", ".join(f"<@{u}>" for u in winners)
         if reroll:
             result_embed = discord.Embed(
-                title="🔁 Giveaway Rerolled!",
                 description=(
-                    f"**Prize:** {discord.utils.escape_markdown(row['prize'])}\n"
-                    f"**New winner{'s' if len(winners) != 1 else ''}:** "
-                    f"{winner_mentions if winners else 'No eligible entrants'}\n\n"
-                    "Congratulations! 🎉"
+                    f"The new winner{'s' if len(winners) != 1 else ''} of the giveaway "
+                    f"**{discord.utils.escape_markdown(row['prize'])}** "
+                    f"{'are' if len(winners) != 1 else 'is'} "
+                    f"{winner_mentions if winners else 'No eligible entrants'}. Congrats! 🎉"
                 ),
                 color=discord.Color.blurple(),
             )
-            result_embed.add_field(name="Giveaway", value=f"[Open Giveaway]({msg.jump_url})", inline=False)
             await channel.send(embed=result_embed, view=result_view)
         else:
             result_embed = discord.Embed(
-                title="🎉 Giveaway Winner!",
                 description=(
-                    f"**Prize:** {discord.utils.escape_markdown(row['prize'])}\n"
-                    f"**Winner{'s' if len(winners) != 1 else ''}:** "
-                    f"{winner_mentions if winners else 'No eligible entrants'}"
+                    f"{winner_mentions if winners else 'No eligible entrants'} won the giveaway of "
+                    f"**{discord.utils.escape_markdown(row['prize'])}!**\n\n"
+                    f"• Hosted by: <@{row['host_id']}>\n"
+                    f"• Reroll Command: `/giveaway reroll message_id:{mid}`"
                 ),
-                color=discord.Color.gold(),
+                color=discord.Color.blurple(),
             )
-            result_embed.add_field(name="Hosted by", value=f"<@{row['host_id']}>", inline=True)
-            result_embed.add_field(name="Giveaway", value=f"[Open Giveaway]({msg.jump_url})", inline=True)
-            result_embed.add_field(name="Reroll", value=f"/giveaway reroll message_id:{mid}", inline=False)
-            await channel.send(content="🎉 **Congratulations!**", embed=result_embed, view=result_view)
+            await channel.send(content="Congratulations! 🎉", embed=result_embed, view=result_view)
 
+        # Original winners and reroll winners receive the same full-format DM.
         for user_id in winners:
             try:
                 user = self.client.get_user(int(user_id)) or await self.client.fetch_user(int(user_id))
                 dm_embed = discord.Embed(
-                    title="🏆 You won the giveaway!",
                     description=(
-                        f"**Prize:** {discord.utils.escape_markdown(row['prize'])}\n"
-                        f"**Hosted by:** <@{row['host_id']}>\n\n"
-                        "Congratulations! 🎉"
+                        f"You won the giveaway of **{discord.utils.escape_markdown(row['prize'])}!**\n\n"
+                        f"• Hosted by: <@{row['host_id']}>\n"
+                        f"• Reroll Command: `/giveaway reroll message_id:{mid}`"
                     ),
-                    color=discord.Color.gold(),
+                    color=discord.Color.blurple(),
                 )
-                dm_embed.add_field(name="Giveaway", value=f"[Open Giveaway]({msg.jump_url})", inline=False)
-                await user.send(embed=dm_embed, view=GiveawayMessageView(msg.jump_url))
+                await user.send(
+                    content="Congratulations! 🎉",
+                    embed=dm_embed,
+                    view=GiveawayMessageView(msg.jump_url),
+                )
             except (discord.Forbidden, discord.HTTPException):
                 log.info("Could not DM giveaway winner %s for giveaway %s", user_id, mid)
         if not reroll and conf.get("premium_enabled"):
