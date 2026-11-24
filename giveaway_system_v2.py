@@ -104,7 +104,7 @@ def embed_for(row):
     if conf.get("premium_enabled"):
         e.add_field(
             name="Premium selection",
-            value="A host-selected participant who joins is guaranteed a place in the first draw. If they do not join, the first draw is random. Every reroll is random.",
+            value="The host may select one participant for a guaranteed place in the first draw if they join. If the selected member does not join, the first draw is random. Every reroll is random.",
             inline=False,
         )
     bypass = [f"<@&{r}>" for r in conf.get("bypass_roles", [])]
