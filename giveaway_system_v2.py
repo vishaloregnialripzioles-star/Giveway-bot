@@ -129,6 +129,17 @@ def participant_entry_counts(row, guild):
     return counts
 
 
+class GiveawayMessageView(discord.ui.View):
+    def __init__(self, jump_url):
+        super().__init__(timeout=None)
+        self.add_item(discord.ui.Button(
+            label="Giveaway Message",
+            style=discord.ButtonStyle.link,
+            url=jump_url,
+            emoji="🔗",
+        ))
+
+
 class RemoveParticipantModal(discord.ui.Modal, title="Remove a giveaway participant"):
     user_id = discord.ui.TextInput(label="Participant user ID", placeholder="Enter the numeric Discord user ID", min_length=17, max_length=20)
 
@@ -371,7 +382,46 @@ class Manager:
         if channel is None: channel=await self.client.fetch_channel(int(row["channel_id"]))
         msg=await channel.fetch_message(mid)
         await msg.edit(embed=embed_for(row),view=None)
-        await channel.send("🎊 Congratulations "+(", ".join(f"<@{u}>" for u in winners) if winners else "No eligible entrants")+"! Giveaway result for **"+row["prize"]+"**.")
+        result_view = GiveawayMessageView(msg.jump_url)
+        winner_mentions = ", ".join(f"<@{u}>" for u in winners)
+        if reroll:
+            result_embed = discord.Embed(
+                description=(
+                    f"The new winner{'s' if len(winners) != 1 else ''} of the giveaway "
+                    f"**{discord.utils.escape_markdown(row['prize'])}** "
+                    f"{'are' if len(winners) != 1 else 'is'} "
+                    f"{winner_mentions if winners else 'No eligible entrants'}. Congrats! 🎉"
+                ),
+                color=discord.Color.blurple(),
+            )
+            await channel.send(embed=result_embed, view=result_view)
+        else:
+            result_embed = discord.Embed(
+                description=(
+                    f"{winner_mentions if winners else 'No eligible entrants'} won the giveaway of "
+                    f"**{discord.utils.escape_markdown(row['prize'])}!**\\n\\n"
+                    f"• Hosted by: <@{row['host_id']}>\\n"
+                    f"• Reroll Command: `/giveaway reroll message_id:{mid}`"
+                ),
+                color=discord.Color.blurple(),
+            )
+            await channel.send(content="Congratulations! 🎉", embed=result_embed, view=result_view)
+
+        # Both original winners and reroll winners receive the same full-format DM.
+        for user_id in winners:
+            try:
+                user = self.client.get_user(int(user_id)) or await self.client.fetch_user(int(user_id))
+                dm_embed = discord.Embed(
+                    description=(
+                        f"You won the giveaway of **{discord.utils.escape_markdown(row['prize'])}!**\\n\\n"
+                        f"• Hosted by: <@{row['host_id']}>\\n"
+                        f"• Reroll Command: `/giveaway reroll message_id:{mid}`"
+                    ),
+                    color=discord.Color.blurple(),
+                )
+                await user.send(content="Congratulations! 🎉", embed=dm_embed, view=GiveawayMessageView(msg.jump_url))
+            except (discord.Forbidden, discord.HTTPException):
+                log.info("Could not DM giveaway winner %s for giveaway %s", user_id, mid)
         return winners
     def register(self,tree):
         group=app_commands.Group(name="giveaway",description="Create and manage giveaways.")
